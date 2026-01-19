@@ -1,0 +1,21 @@
+name: "Semver Labeler"
+description: "Run cargo-semver-checks on PRs and label the required semver bump"
+inputs:
+  cargo-semver-checks-version:
+    description: "cargo-semver-checks version to install (e.g. 0.45.0 or latest)"
+    required: false
+    default: "latest"
+  label-prefix:
+    description: "Label prefix (e.g. 'semver: ')"
+    required: false
+    default: "semver: "
+  github-token:
+    description: "GitHub token used to label PRs"
+    required: false
+    default: ${{ github.token }}
+outputs:
+  semver-type:
+    description: "Detected semver update type (major/minor/patch)"
+runs:
+  using: "node24"
+  main: "dist/index.js"

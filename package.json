@@ -1,0 +1,20 @@
+{
+  "name": "semver-labeler-action",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@10.26.2",
+  "scripts": {
+    "build": "ncc build src/index.js -o dist"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/github": "^6.0.0"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.38.1"
+  }
+}

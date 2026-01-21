@@ -32119,67 +32119,63 @@ const core = __nccwpck_require__(9550);
 const github = __nccwpck_require__(8087);
 const { spawnSync } = __nccwpck_require__(7698);
 
-const DEFAULT_CARGO_SEMVER_CHECKS_VERSION = 'latest';
-const DEFAULT_LABEL_PREFIX = 'semver: ';
+const DEFAULT_CARGO_SEMVER_CHECKS_VERSION = "latest";
+const DEFAULT_LABEL_PREFIX = "semver: ";
+const ANSI_ESCAPE = String.fromCharCode(27);
+const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
 
 function runCommand(command, args, options = {}) {
   const result = spawnSync(command, args, {
-    encoding: 'utf8',
+    encoding: "utf8",
     ...options,
   });
 
   if (result.error) {
-    throw new Error(
-      `Failed to run "${command} ${args.join(' ')}": ${result.error.message}`
-    );
+    throw new Error(`Failed to run "${command} ${args.join(" ")}": ${result.error.message}`);
   }
 
   return result;
 }
 
 function stripAnsi(input) {
-  return input.replace(/\u001b\[[0-9;]*m/g, '');
+  return input.replace(ANSI_ESCAPE_REGEX, "");
 }
 
 function ensureGitShaAvailable(sha, cwd) {
-  const check = runCommand('git', ['cat-file', '-e', `${sha}^{commit}`], {
+  const check = runCommand("git", ["cat-file", "-e", `${sha}^{commit}`], {
     cwd,
   });
   if (check.status === 0) {
     return;
   }
 
-  const fetch = runCommand(
-    'git',
-    ['fetch', '--no-tags', '--depth=1', 'origin', sha],
-    { cwd }
-  );
+  const fetch = runCommand("git", ["fetch", "--no-tags", "--depth=1", "origin", sha], { cwd });
   if (fetch.status !== 0) {
     throw new Error(
       `Failed to fetch base SHA ${sha}: ${stripAnsi(
-        `${fetch.stdout || ''}\n${fetch.stderr || ''}`
-      ).trim()}`
+        `${fetch.stdout || ""}\n${fetch.stderr || ""}`,
+      ).trim()}`,
     );
   }
 }
 
 function installCargoSemverChecks(version, cwd) {
-  const cargoCheck = runCommand('cargo', ['--version'], { cwd });
+  const cargoCheck = runCommand("cargo", ["--version"], { cwd });
   if (cargoCheck.status !== 0) {
-    throw new Error('cargo is not available in PATH.');
+    throw new Error("cargo is not available in PATH.");
   }
 
-  const args = ['install', 'cargo-semver-checks', '--locked'];
+  const args = ["install", "cargo-semver-checks", "--locked"];
   if (version && version !== DEFAULT_CARGO_SEMVER_CHECKS_VERSION) {
-    args.push('--version', version);
+    args.push("--version", version);
   }
 
-  const install = runCommand('cargo', args, { cwd, env: process.env });
+  const install = runCommand("cargo", args, { cwd, env: process.env });
   if (install.status !== 0) {
     throw new Error(
       `cargo-semver-checks install failed: ${stripAnsi(
-        `${install.stdout || ''}\n${install.stderr || ''}`
-      ).trim()}`
+        `${install.stdout || ""}\n${install.stderr || ""}`,
+      ).trim()}`,
     );
   }
 }
@@ -32187,28 +32183,26 @@ function installCargoSemverChecks(version, cwd) {
 function isUnsupportedJsonFlag(output) {
   const lowered = output.toLowerCase();
   return (
-    (lowered.includes('unknown argument') ||
-      lowered.includes('unexpected argument') ||
-      lowered.includes('unrecognized option') ||
-      lowered.includes('found argument')) &&
-    lowered.includes('output') &&
-    lowered.includes('format')
+    (lowered.includes("unknown argument") ||
+      lowered.includes("unexpected argument") ||
+      lowered.includes("unrecognized option") ||
+      lowered.includes("found argument")) &&
+    lowered.includes("output") &&
+    lowered.includes("format")
   );
 }
 
 function runSemverChecks(baseSha, cwd) {
-  const env = { ...process.env, CARGO_TERM_COLOR: 'never' };
-  const baseArgs = ['semver-checks', '--baseline-rev', baseSha];
-  const jsonArgs = [...baseArgs, '--output-format', 'json'];
+  const env = { ...process.env, CARGO_TERM_COLOR: "never" };
+  const baseArgs = ["semver-checks", "--baseline-rev", baseSha];
+  const jsonArgs = [...baseArgs, "--output-format", "json"];
 
-  let result = runCommand('cargo', jsonArgs, { cwd, env });
-  const combined = stripAnsi(
-    `${result.stdout || ''}\n${result.stderr || ''}`
-  ).trim();
+  let result = runCommand("cargo", jsonArgs, { cwd, env });
+  const combined = stripAnsi(`${result.stdout || ""}\n${result.stderr || ""}`).trim();
 
   if (result.status !== 0 && isUnsupportedJsonFlag(combined)) {
-    core.info('JSON output is not supported; rerunning without it.');
-    result = runCommand('cargo', baseArgs, { cwd, env });
+    core.info("JSON output is not supported; rerunning without it.");
+    result = runCommand("cargo", baseArgs, { cwd, env });
   }
 
   return result;
@@ -32220,13 +32214,13 @@ function tryParseJson(text) {
     return null;
   }
 
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
     return null;
   }
 
   try {
     return JSON.parse(trimmed);
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -32240,12 +32234,9 @@ function extractRequiredUpdatesFromJson(payload) {
       return;
     }
 
-    if (value && typeof value === 'object') {
+    if (value && typeof value === "object") {
       for (const [key, nested] of Object.entries(value)) {
-        if (
-          /required[-_]?update/i.test(key) &&
-          typeof nested === 'string'
-        ) {
+        if (/required[-_]?update/i.test(key) && typeof nested === "string") {
           found.add(nested.toLowerCase());
         }
         visit(nested);
@@ -32253,10 +32244,8 @@ function extractRequiredUpdatesFromJson(payload) {
       return;
     }
 
-    if (typeof value === 'string') {
-      const match = value.match(
-        /required[-_ ]update\s*[:=]\s*(major|minor|patch)/i
-      );
+    if (typeof value === "string") {
+      const match = value.match(/required[-_ ]update\s*[:=]\s*(major|minor|patch)/i);
       if (match) {
         found.add(match[1].toLowerCase());
       }
@@ -32290,9 +32279,7 @@ function extractRequiredUpdatesFromText(text) {
 }
 
 function determineSemverType(result) {
-  const combined = stripAnsi(
-    `${result.stdout || ''}\n${result.stderr || ''}`
-  ).trim();
+  const combined = stripAnsi(`${result.stdout || ""}\n${result.stderr || ""}`).trim();
 
   const jsonPayload = tryParseJson(combined);
   const requiredUpdates = jsonPayload
@@ -32303,22 +32290,20 @@ function determineSemverType(result) {
   const successMessage = /no\s+(semver|public|api)/i.test(combined);
 
   if (result.status !== 0 && !hasUpdates && !successMessage) {
-    throw new Error(
-      `cargo semver-checks failed to produce parseable output:\n${combined}`
-    );
+    throw new Error(`cargo semver-checks failed to produce parseable output:\n${combined}`);
   }
 
-  if (requiredUpdates.has('major')) {
-    return 'major';
+  if (requiredUpdates.has("major")) {
+    return "major";
   }
-  if (requiredUpdates.has('minor')) {
-    return 'minor';
+  if (requiredUpdates.has("minor")) {
+    return "minor";
   }
-  if (requiredUpdates.has('patch')) {
-    return 'patch';
+  if (requiredUpdates.has("patch")) {
+    return "patch";
   }
 
-  return 'patch';
+  return "patch";
 }
 
 async function ensureLabelExists(octokit, owner, repo, name) {
@@ -32335,8 +32320,8 @@ async function ensureLabelExists(octokit, owner, repo, name) {
     owner,
     repo,
     name,
-    color: 'ededed',
-    description: 'Semver required update',
+    color: "ededed",
+    description: "Semver required update",
   });
 }
 
@@ -32355,14 +32340,7 @@ async function removeLabelIfExists(octokit, owner, repo, issueNumber, name) {
   }
 }
 
-async function upsertSemverLabel(
-  octokit,
-  owner,
-  repo,
-  issueNumber,
-  labelPrefix,
-  newLabel
-) {
+async function upsertSemverLabel(octokit, owner, repo, issueNumber, labelPrefix, newLabel) {
   const { data: existingLabels } = await octokit.rest.issues.listLabelsOnIssue({
     owner,
     repo,
@@ -32374,13 +32352,7 @@ async function upsertSemverLabel(
   if (labelPrefix && labelPrefix.length > 0) {
     for (const label of existingLabels) {
       if (label.name.startsWith(labelPrefix) && label.name !== newLabel) {
-        await removeLabelIfExists(
-          octokit,
-          owner,
-          repo,
-          issueNumber,
-          label.name
-        );
+        await removeLabelIfExists(octokit, owner, repo, issueNumber, label.name);
       }
     }
   }
@@ -32399,20 +32371,18 @@ async function upsertSemverLabel(
 async function run() {
   try {
     const cargoVersion =
-      core.getInput('cargo-semver-checks-version') ||
-      DEFAULT_CARGO_SEMVER_CHECKS_VERSION;
-    const labelPrefix =
-      core.getInput('label-prefix') || DEFAULT_LABEL_PREFIX;
-    const githubToken = core.getInput('github-token', { required: true });
+      core.getInput("cargo-semver-checks-version") || DEFAULT_CARGO_SEMVER_CHECKS_VERSION;
+    const labelPrefix = core.getInput("label-prefix") || DEFAULT_LABEL_PREFIX;
+    const githubToken = core.getInput("github-token", { required: true });
 
     const pr = github.context.payload.pull_request;
     if (!pr) {
-      throw new Error('This action must run on pull_request events.');
+      throw new Error("This action must run on pull_request events.");
     }
 
     const baseSha = pr.base && pr.base.sha;
     if (!baseSha) {
-      throw new Error('Unable to determine the PR base SHA.');
+      throw new Error("Unable to determine the PR base SHA.");
     }
 
     const cwd = process.env.GITHUB_WORKSPACE || process.cwd();
@@ -32427,16 +32397,9 @@ async function run() {
     const octokit = github.getOctokit(githubToken);
     const { owner, repo } = github.context.repo;
 
-    await upsertSemverLabel(
-      octokit,
-      owner,
-      repo,
-      pr.number,
-      labelPrefix,
-      label
-    );
+    await upsertSemverLabel(octokit, owner, repo, pr.number, labelPrefix, label);
 
-    core.setOutput('semver-type', semverType);
+    core.setOutput("semver-type", semverType);
     core.info(`Applied label "${label}" to PR #${pr.number}.`);
   } catch (error) {
     core.setFailed(error && error.message ? error.message : String(error));

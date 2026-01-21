@@ -19,16 +19,16 @@ required semver update level.
 
 ## Inputs
 
-| Name | Required | Default | Description |
-| --- | --- | --- | --- |
-| `cargo-semver-checks-version` | false | `latest` | Version of `cargo-semver-checks` to install. |
-| `label-prefix` | false | `semver: ` | Prefix for labels. |
-| `github-token` | false | `github.token` | Token with permission to label PRs. |
+| Name                          | Required | Default        | Description                                  |
+| ----------------------------- | -------- | -------------- | -------------------------------------------- |
+| `cargo-semver-checks-version` | false    | `latest`       | Version of `cargo-semver-checks` to install. |
+| `label-prefix`                | false    | `semver: `     | Prefix for labels.                           |
+| `github-token`                | false    | `github.token` | Token with permission to label PRs.          |
 
 ## Outputs
 
-| Name | Description |
-| --- | --- |
+| Name          | Description                                         |
+| ------------- | --------------------------------------------------- |
 | `semver-type` | Detected update type: `major`, `minor`, or `patch`. |
 
 ## Usage

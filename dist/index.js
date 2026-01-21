@@ -32142,13 +32142,16 @@ function stripAnsi(input) {
 }
 
 function ensureGitShaAvailable(sha, cwd) {
+  core.info(`Checking if base SHA ${sha} is available...`);
   const check = runCommand("git", ["cat-file", "-e", `${sha}^{commit}`], {
     cwd,
   });
   if (check.status === 0) {
+    core.info("Base SHA is already available.");
     return;
   }
 
+  core.info(`Fetching base SHA ${sha} from origin...`);
   const fetch = runCommand("git", ["fetch", "--no-tags", "--depth=1", "origin", sha], { cwd });
   if (fetch.status !== 0) {
     throw new Error(
@@ -32157,6 +32160,7 @@ function ensureGitShaAvailable(sha, cwd) {
       ).trim()}`,
     );
   }
+  core.info("Base SHA fetched successfully.");
 }
 
 function installCargoSemverChecks(version, cwd, toolchain) {
@@ -32164,6 +32168,7 @@ function installCargoSemverChecks(version, cwd, toolchain) {
   if (cargoCheck.status !== 0) {
     throw new Error("cargo is not available in PATH.");
   }
+  core.info(`Cargo version: ${cargoCheck.stdout.trim()}`);
 
   const args = [];
   if (toolchain) {
@@ -32174,6 +32179,7 @@ function installCargoSemverChecks(version, cwd, toolchain) {
     args.push("--version", version);
   }
 
+  core.info(`Installing cargo-semver-checks: cargo ${args.join(" ")}`);
   const install = runCommand("cargo", args, { cwd, env: process.env });
   if (install.status !== 0) {
     throw new Error(
@@ -32182,91 +32188,39 @@ function installCargoSemverChecks(version, cwd, toolchain) {
       ).trim()}`,
     );
   }
-}
-
-function isUnsupportedJsonFlag(output) {
-  const lowered = output.toLowerCase();
-  return (
-    (lowered.includes("unknown argument") ||
-      lowered.includes("unexpected argument") ||
-      lowered.includes("unrecognized option") ||
-      lowered.includes("found argument")) &&
-    lowered.includes("output") &&
-    lowered.includes("format")
-  );
+  core.info("cargo-semver-checks installed successfully.");
 }
 
 function runSemverChecks(baseSha, cwd, packageName, toolchain) {
-  const env = { ...process.env, CARGO_TERM_COLOR: "never" };
-  const baseArgs = [];
+  const env = { ...process.env, CARGO_TERM_COLOR: "always" };
+  const args = [];
   if (toolchain) {
-    baseArgs.push(`+${toolchain}`);
+    args.push(`+${toolchain}`);
   }
-  baseArgs.push("semver-checks", "--baseline-rev", baseSha);
+  args.push("semver-checks", "--baseline-rev", baseSha);
   if (packageName) {
-    baseArgs.push("-p", packageName);
+    args.push("-p", packageName);
   } else {
-    baseArgs.push("--workspace");
+    args.push("--workspace");
   }
-  const jsonArgs = [...baseArgs, "--output-format", "json"];
 
-  let result = runCommand("cargo", jsonArgs, { cwd, env });
-  const combined = stripAnsi(`${result.stdout || ""}\n${result.stderr || ""}`).trim();
+  core.info(`Running: cargo ${args.join(" ")}`);
+  core.info("---");
 
-  if (result.status !== 0 && isUnsupportedJsonFlag(combined)) {
-    core.info("JSON output is not supported; rerunning without it.");
-    result = runCommand("cargo", baseArgs, { cwd, env });
+  const result = runCommand("cargo", args, { cwd, env });
+
+  // Log stdout and stderr
+  if (result.stdout) {
+    core.info(result.stdout);
   }
+  if (result.stderr) {
+    core.info(result.stderr);
+  }
+
+  core.info("---");
+  core.info(`Exit code: ${result.status}`);
 
   return result;
-}
-
-function tryParseJson(text) {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return null;
-  }
-}
-
-function extractRequiredUpdatesFromJson(payload) {
-  const found = new Set();
-
-  const visit = (value) => {
-    if (Array.isArray(value)) {
-      value.forEach(visit);
-      return;
-    }
-
-    if (value && typeof value === "object") {
-      for (const [key, nested] of Object.entries(value)) {
-        if (/required[-_]?update/i.test(key) && typeof nested === "string") {
-          found.add(nested.toLowerCase());
-        }
-        visit(nested);
-      }
-      return;
-    }
-
-    if (typeof value === "string") {
-      const match = value.match(/required[-_ ]update\s*[:=]\s*(major|minor|patch)/i);
-      if (match) {
-        found.add(match[1].toLowerCase());
-      }
-    }
-  };
-
-  visit(payload);
-  return found;
 }
 
 function extractRequiredUpdatesFromText(text) {
@@ -32294,10 +32248,7 @@ function extractRequiredUpdatesFromText(text) {
 function determineSemverType(result) {
   const combined = stripAnsi(`${result.stdout || ""}\n${result.stderr || ""}`).trim();
 
-  const jsonPayload = tryParseJson(combined);
-  const requiredUpdates = jsonPayload
-    ? extractRequiredUpdatesFromJson(jsonPayload)
-    : extractRequiredUpdatesFromText(combined);
+  const requiredUpdates = extractRequiredUpdatesFromText(combined);
 
   const hasUpdates = requiredUpdates.size > 0;
   const successMessage = /no\s+(semver|public|api)/i.test(combined);
@@ -32305,6 +32256,8 @@ function determineSemverType(result) {
   if (result.status !== 0 && !hasUpdates && !successMessage) {
     throw new Error(`cargo semver-checks failed to produce parseable output:\n${combined}`);
   }
+
+  core.info(`Detected required updates: ${[...requiredUpdates].join(", ") || "none"}`);
 
   if (requiredUpdates.has("major")) {
     return "major";
@@ -32402,12 +32355,24 @@ async function run() {
 
     const cwd = process.env.GITHUB_WORKSPACE || process.cwd();
 
+    core.info(`Working directory: ${cwd}`);
+    core.info(`PR base SHA: ${baseSha}`);
+    if (toolchain) {
+      core.info(`Toolchain: ${toolchain}`);
+    }
+    if (packageName) {
+      core.info(`Package: ${packageName}`);
+    }
+    core.info("");
+
     ensureGitShaAvailable(baseSha, cwd);
     installCargoSemverChecks(cargoVersion, cwd, toolchain);
 
+    core.info("");
     const result = runSemverChecks(baseSha, cwd, packageName, toolchain);
     const semverType = determineSemverType(result);
     const label = `${labelPrefix}${semverType}`;
+    core.info(`Determined semver type: ${semverType}`);
 
     const octokit = github.getOctokit(githubToken);
     const { owner, repo } = github.context.repo;

@@ -32340,7 +32340,7 @@ function runSemverChecks(baseSha, cwd, packageName, toolchain) {
   if (toolchain) {
     args.push(`+${toolchain}`);
   }
-  args.push("semver-checks", "--baseline-rev", baseSha);
+  args.push("semver-checks", "--baseline-rev", baseSha, "--release-type=patch");
   if (packageName) {
     args.push("-p", packageName);
   } else {

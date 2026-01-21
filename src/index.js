@@ -110,13 +110,7 @@ function extractRequiredUpdatesFromText(text) {
   const found = new Set();
   const cleaned = stripAnsi(text);
 
-  const regexes = [
-    /required[-_ ]update\s*[:=]\s*(major|minor|patch)/gi,
-    /requires a (major|minor|patch) version bump/gi,
-    /requires (major|minor|patch) version bump/gi,
-    /required update\s*\((major|minor|patch)\)/gi,
-    /requires (major|minor|patch) bump/gi,
-  ];
+  const regexes = [/semver requires new (major|minor|patch) version/gi];
 
   for (const regex of regexes) {
     let match;

@@ -14,18 +14,20 @@ required semver update level.
 
 - Runs `cargo semver-checks --baseline-rev <base_sha> --workspace` by default.
 - If `package` input is specified, runs with `-p <package>` instead of `--workspace`.
+- If `toolchain` input is specified, runs with `cargo +<toolchain>` (e.g. `cargo +nightly`).
 - Picks the highest required update: `major` > `minor` > `patch`.
 - Removes existing labels that start with the configured prefix.
 - Creates the label if it does not exist.
 
 ## Inputs
 
-| Name                          | Required | Default        | Description                                           |
-| ----------------------------- | -------- | -------------- | ----------------------------------------------------- |
-| `cargo-semver-checks-version` | false    | `latest`       | Version of `cargo-semver-checks` to install.          |
-| `label-prefix`                | false    | `semver: `     | Prefix for labels.                                    |
-| `github-token`                | false    | `github.token` | Token with permission to label PRs.                   |
-| `package`                     | false    |                | Specific package to check (checks all if not set).    |
+| Name                          | Required | Default        | Description                                        |
+| ----------------------------- | -------- | -------------- | -------------------------------------------------- |
+| `cargo-semver-checks-version` | false    | `latest`       | Version of `cargo-semver-checks` to install.       |
+| `label-prefix`                | false    | `semver: `     | Prefix for labels.                                 |
+| `github-token`                | false    | `github.token` | Token with permission to label PRs.                |
+| `package`                     | false    |                | Specific package to check (checks all if not set). |
+| `toolchain`                   | false    |                | Rust toolchain to use (e.g. `nightly`, `stable`).  |
 
 ## Outputs
 
@@ -60,10 +62,19 @@ jobs:
 ### Checking a specific package
 
 ```yaml
-      - uses: JohnTitor/cargo-semver-checks@v0.1.0
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          package: my-crate
+- uses: JohnTitor/cargo-semver-checks@v0.1.0
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    package: my-crate
+```
+
+### Using a specific toolchain
+
+```yaml
+- uses: JohnTitor/cargo-semver-checks@v0.1.0
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    toolchain: nightly
 ```
 
 ## Development

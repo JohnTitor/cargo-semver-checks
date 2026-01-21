@@ -16,6 +16,9 @@ inputs:
   package:
     description: "Specific package to check (if not set, checks all workspace packages)"
     required: false
+  toolchain:
+    description: "Rust toolchain to use (e.g. nightly, stable, 1.70.0)"
+    required: false
 outputs:
   semver-type:
     description: "Detected semver update type (major/minor/patch)"

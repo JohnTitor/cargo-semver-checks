@@ -12,18 +12,20 @@ required semver update level.
 
 ## Behavior
 
-- Runs `cargo semver-checks --baseline-rev <base_sha>`.
+- Runs `cargo semver-checks --baseline-rev <base_sha> --workspace` by default.
+- If `package` input is specified, runs with `-p <package>` instead of `--workspace`.
 - Picks the highest required update: `major` > `minor` > `patch`.
 - Removes existing labels that start with the configured prefix.
 - Creates the label if it does not exist.
 
 ## Inputs
 
-| Name                          | Required | Default        | Description                                  |
-| ----------------------------- | -------- | -------------- | -------------------------------------------- |
-| `cargo-semver-checks-version` | false    | `latest`       | Version of `cargo-semver-checks` to install. |
-| `label-prefix`                | false    | `semver: `     | Prefix for labels.                           |
-| `github-token`                | false    | `github.token` | Token with permission to label PRs.          |
+| Name                          | Required | Default        | Description                                           |
+| ----------------------------- | -------- | -------------- | ----------------------------------------------------- |
+| `cargo-semver-checks-version` | false    | `latest`       | Version of `cargo-semver-checks` to install.          |
+| `label-prefix`                | false    | `semver: `     | Prefix for labels.                                    |
+| `github-token`                | false    | `github.token` | Token with permission to label PRs.                   |
+| `package`                     | false    |                | Specific package to check (checks all if not set).    |
 
 ## Outputs
 
@@ -53,6 +55,15 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cargo-semver-checks-version: latest
           label-prefix: "semver: "
+```
+
+### Checking a specific package
+
+```yaml
+      - uses: JohnTitor/cargo-semver-checks@v0.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          package: my-crate
 ```
 
 ## Development

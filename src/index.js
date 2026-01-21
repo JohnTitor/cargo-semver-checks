@@ -75,9 +75,14 @@ function isUnsupportedJsonFlag(output) {
   );
 }
 
-function runSemverChecks(baseSha, cwd) {
+function runSemverChecks(baseSha, cwd, packageName) {
   const env = { ...process.env, CARGO_TERM_COLOR: "never" };
   const baseArgs = ["semver-checks", "--baseline-rev", baseSha];
+  if (packageName) {
+    baseArgs.push("-p", packageName);
+  } else {
+    baseArgs.push("--workspace");
+  }
   const jsonArgs = [...baseArgs, "--output-format", "json"];
 
   let result = runCommand("cargo", jsonArgs, { cwd, env });
@@ -257,6 +262,7 @@ async function run() {
       core.getInput("cargo-semver-checks-version") || DEFAULT_CARGO_SEMVER_CHECKS_VERSION;
     const labelPrefix = core.getInput("label-prefix") || DEFAULT_LABEL_PREFIX;
     const githubToken = core.getInput("github-token", { required: true });
+    const packageName = core.getInput("package") || "";
 
     const pr = github.context.payload.pull_request;
     if (!pr) {
@@ -273,7 +279,7 @@ async function run() {
     ensureGitShaAvailable(baseSha, cwd);
     installCargoSemverChecks(cargoVersion, cwd);
 
-    const result = runSemverChecks(baseSha, cwd);
+    const result = runSemverChecks(baseSha, cwd, packageName);
     const semverType = determineSemverType(result);
     const label = `${labelPrefix}${semverType}`;
 

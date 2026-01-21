@@ -13,6 +13,9 @@ inputs:
     description: "GitHub token used to label PRs"
     required: false
     default: ${{ github.token }}
+  package:
+    description: "Specific package to check (if not set, checks all workspace packages)"
+    required: false
 outputs:
   semver-type:
     description: "Detected semver update type (major/minor/patch)"

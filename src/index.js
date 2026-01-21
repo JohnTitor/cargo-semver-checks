@@ -1,11 +1,16 @@
 const core = require("@actions/core");
 const github = require("@actions/github");
 const { spawnSync } = require("child_process");
+const https = require("https");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 
 const DEFAULT_CARGO_SEMVER_CHECKS_VERSION = "latest";
 const DEFAULT_LABEL_PREFIX = "semver: ";
 const ANSI_ESCAPE = String.fromCharCode(27);
 const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
+const GITHUB_RELEASES_BASE = "https://github.com/obi1kenobi/cargo-semver-checks/releases";
 
 function runCommand(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -46,13 +51,125 @@ function ensureGitShaAvailable(sha, cwd) {
   core.info("Base SHA fetched successfully.");
 }
 
-function installCargoSemverChecks(version, cwd, toolchain) {
-  const cargoCheck = runCommand("cargo", ["--version"], { cwd });
-  if (cargoCheck.status !== 0) {
-    throw new Error("cargo is not available in PATH.");
-  }
-  core.info(`Cargo version: ${cargoCheck.stdout.trim()}`);
+function getTargetTriple() {
+  const platform = os.platform();
+  const arch = os.arch();
 
+  if (platform === "linux" && arch === "x64") {
+    return "x86_64-unknown-linux-gnu";
+  }
+  if (platform === "linux" && arch === "arm64") {
+    return "aarch64-unknown-linux-gnu";
+  }
+  if (platform === "darwin" && arch === "x64") {
+    return "x86_64-apple-darwin";
+  }
+  if (platform === "darwin" && arch === "arm64") {
+    return "aarch64-apple-darwin";
+  }
+  if (platform === "win32" && arch === "x64") {
+    return "x86_64-pc-windows-msvc";
+  }
+
+  return null;
+}
+
+function httpsGet(url) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        httpsGet(response.headers.location).then(resolve).catch(reject);
+        return;
+      }
+
+      if (response.statusCode !== 200) {
+        reject(new Error(`HTTP ${response.statusCode} for ${url}`));
+        return;
+      }
+
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve(Buffer.concat(chunks)));
+      response.on("error", reject);
+    });
+    request.on("error", reject);
+  });
+}
+
+async function getLatestVersion() {
+  const url = `${GITHUB_RELEASES_BASE}/latest`;
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        const match = response.headers.location.match(/\/tag\/v?(.+)$/);
+        if (match) {
+          resolve(match[1]);
+          return;
+        }
+      }
+      reject(new Error("Failed to determine latest version"));
+    });
+    request.on("error", reject);
+  });
+}
+
+async function installFromRelease(version) {
+  const triple = getTargetTriple();
+  if (!triple) {
+    throw new Error(`Unsupported platform: ${os.platform()}-${os.arch()}`);
+  }
+
+  let resolvedVersion = version;
+  if (version === DEFAULT_CARGO_SEMVER_CHECKS_VERSION) {
+    core.info("Resolving latest version...");
+    resolvedVersion = await getLatestVersion();
+    core.info(`Latest version: ${resolvedVersion}`);
+  }
+
+  const versionTag = resolvedVersion.startsWith("v") ? resolvedVersion : `v${resolvedVersion}`;
+  const isWindows = os.platform() === "win32";
+  const ext = isWindows ? "zip" : "tar.gz";
+  const assetName = `cargo-semver-checks-${triple}.${ext}`;
+  const downloadUrl = `${GITHUB_RELEASES_BASE}/download/${versionTag}/${assetName}`;
+
+  core.info(`Downloading: ${downloadUrl}`);
+  const data = await httpsGet(downloadUrl);
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cargo-semver-checks-"));
+  const archivePath = path.join(tempDir, assetName);
+  fs.writeFileSync(archivePath, data);
+
+  const binDir = path.join(os.homedir(), ".cargo", "bin");
+  if (!fs.existsSync(binDir)) {
+    fs.mkdirSync(binDir, { recursive: true });
+  }
+
+  if (isWindows) {
+    const unzip = runCommand("powershell", [
+      "-Command",
+      `Expand-Archive -Path '${archivePath}' -DestinationPath '${tempDir}' -Force`,
+    ]);
+    if (unzip.status !== 0) {
+      throw new Error(`Failed to extract zip: ${unzip.stderr}`);
+    }
+    const exePath = path.join(tempDir, "cargo-semver-checks.exe");
+    fs.copyFileSync(exePath, path.join(binDir, "cargo-semver-checks.exe"));
+  } else {
+    const tar = runCommand("tar", ["-xzf", archivePath, "-C", tempDir]);
+    if (tar.status !== 0) {
+      throw new Error(`Failed to extract tarball: ${tar.stderr}`);
+    }
+    const binPath = path.join(tempDir, "cargo-semver-checks");
+    const destPath = path.join(binDir, "cargo-semver-checks");
+    fs.copyFileSync(binPath, destPath);
+    fs.chmodSync(destPath, 0o755);
+  }
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+  core.info("cargo-semver-checks installed from release successfully.");
+}
+
+function installWithCargo(version, cwd, toolchain) {
   const args = [];
   if (toolchain) {
     args.push(`+${toolchain}`);
@@ -72,6 +189,32 @@ function installCargoSemverChecks(version, cwd, toolchain) {
     );
   }
   core.info("cargo-semver-checks installed successfully.");
+}
+
+async function installCargoSemverChecks(version, cwd, toolchain, useReleaseBinary) {
+  const cargoCheck = runCommand("cargo", ["--version"], { cwd });
+  if (cargoCheck.status !== 0) {
+    throw new Error("cargo is not available in PATH.");
+  }
+  core.info(`Cargo version: ${cargoCheck.stdout.trim()}`);
+
+  if (useReleaseBinary) {
+    const triple = getTargetTriple();
+    if (triple) {
+      try {
+        await installFromRelease(version);
+        return;
+      } catch (error) {
+        core.warning(
+          `Failed to install from release: ${error.message}. Falling back to cargo install.`,
+        );
+      }
+    } else {
+      core.info(`No prebuilt binary for ${os.platform()}-${os.arch()}, using cargo install.`);
+    }
+  }
+
+  installWithCargo(version, cwd, toolchain);
 }
 
 function runSemverChecks(baseSha, cwd, packageName, toolchain) {
@@ -215,6 +358,8 @@ async function run() {
   try {
     const cargoVersion =
       core.getInput("cargo-semver-checks-version") || DEFAULT_CARGO_SEMVER_CHECKS_VERSION;
+    const useReleaseBinaryInput = core.getInput("use-release-binary");
+    const useReleaseBinary = useReleaseBinaryInput === "" || useReleaseBinaryInput === "true";
     const labelPrefix = core.getInput("label-prefix") || DEFAULT_LABEL_PREFIX;
     const githubToken = core.getInput("github-token", { required: true });
     const packageName = core.getInput("package") || "";
@@ -234,6 +379,7 @@ async function run() {
 
     core.info(`Working directory: ${cwd}`);
     core.info(`PR base SHA: ${baseSha}`);
+    core.info(`Use release binary: ${useReleaseBinary}`);
     if (toolchain) {
       core.info(`Toolchain: ${toolchain}`);
     }
@@ -243,7 +389,7 @@ async function run() {
     core.info("");
 
     ensureGitShaAvailable(baseSha, cwd);
-    installCargoSemverChecks(cargoVersion, cwd, toolchain);
+    await installCargoSemverChecks(cargoVersion, cwd, toolchain, useReleaseBinary);
 
     core.info("");
     const result = runSemverChecks(baseSha, cwd, packageName, toolchain);

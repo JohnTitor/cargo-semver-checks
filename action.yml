@@ -5,6 +5,10 @@ inputs:
     description: "cargo-semver-checks version to install (e.g. 0.45.0 or latest)"
     required: false
     default: "latest"
+  use-release-binary:
+    description: "Install from GitHub release tarball instead of cargo install (faster)"
+    required: false
+    default: "true"
   label-prefix:
     description: "Label prefix (e.g. 'semver: ')"
     required: false

@@ -21,13 +21,14 @@ required semver update level.
 
 ## Inputs
 
-| Name                          | Required | Default        | Description                                        |
-| ----------------------------- | -------- | -------------- | -------------------------------------------------- |
-| `cargo-semver-checks-version` | false    | `latest`       | Version of `cargo-semver-checks` to install.       |
-| `label-prefix`                | false    | `semver: `     | Prefix for labels.                                 |
-| `github-token`                | false    | `github.token` | Token with permission to label PRs.                |
-| `package`                     | false    |                | Specific package to check (checks all if not set). |
-| `toolchain`                   | false    |                | Rust toolchain to use (e.g. `nightly`, `stable`).  |
+| Name                          | Required | Default        | Description                                                     |
+| ----------------------------- | -------- | -------------- | --------------------------------------------------------------- |
+| `cargo-semver-checks-version` | false    | `latest`       | Version of `cargo-semver-checks` to install.                    |
+| `use-release-binary`          | false    | `true`         | Install from GitHub release tarball instead of `cargo install`. |
+| `label-prefix`                | false    | `semver: `     | Prefix for labels.                                              |
+| `github-token`                | false    | `github.token` | Token with permission to label PRs.                             |
+| `package`                     | false    |                | Specific package to check (checks all if not set).              |
+| `toolchain`                   | false    |                | Rust toolchain to use (e.g. `nightly`, `stable`).               |
 
 ## Outputs
 
@@ -76,6 +77,23 @@ jobs:
     github-token: ${{ secrets.GITHUB_TOKEN }}
     toolchain: nightly
 ```
+
+### Using `cargo install` instead of pre-built binaries
+
+By default, the action downloads pre-built binaries from GitHub releases for faster installation.
+If you prefer to build from source using `cargo install`, set `use-release-binary` to `false`:
+
+```yaml
+- uses: JohnTitor/cargo-semver-checks@v0.1.0
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    use-release-binary: false
+```
+
+**Note:** The action automatically falls back to `cargo install` if:
+
+- No pre-built binary is available for the platform
+- The download fails for any reason
 
 ## Development
 

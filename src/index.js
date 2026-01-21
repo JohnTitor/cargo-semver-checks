@@ -42,13 +42,17 @@ function ensureGitShaAvailable(sha, cwd) {
   }
 }
 
-function installCargoSemverChecks(version, cwd) {
+function installCargoSemverChecks(version, cwd, toolchain) {
   const cargoCheck = runCommand("cargo", ["--version"], { cwd });
   if (cargoCheck.status !== 0) {
     throw new Error("cargo is not available in PATH.");
   }
 
-  const args = ["install", "cargo-semver-checks", "--locked"];
+  const args = [];
+  if (toolchain) {
+    args.push(`+${toolchain}`);
+  }
+  args.push("install", "cargo-semver-checks", "--locked");
   if (version && version !== DEFAULT_CARGO_SEMVER_CHECKS_VERSION) {
     args.push("--version", version);
   }
@@ -282,7 +286,7 @@ async function run() {
     const cwd = process.env.GITHUB_WORKSPACE || process.cwd();
 
     ensureGitShaAvailable(baseSha, cwd);
-    installCargoSemverChecks(cargoVersion, cwd);
+    installCargoSemverChecks(cargoVersion, cwd, toolchain);
 
     const result = runSemverChecks(baseSha, cwd, packageName, toolchain);
     const semverType = determineSemverType(result);

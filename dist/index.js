@@ -30425,7 +30425,8 @@ async function installCargoSemverChecks(version, cwd, toolchain, useReleaseBinar
     }
     installWithCargo(version, cwd, toolchain);
 }
-function runSemverChecks(baseSha, cwd, packageName, toolchain) {
+function runSemverChecks(options) {
+    const { baseSha, cwd, packageName, toolchain, featureGroup, features, rustTarget } = options;
     const env = { ...process.env, CARGO_TERM_COLOR: "always" };
     const args = [];
     if (toolchain) {
@@ -30437,6 +30438,23 @@ function runSemverChecks(baseSha, cwd, packageName, toolchain) {
     }
     else {
         args.push("--workspace");
+    }
+    if (featureGroup) {
+        if (featureGroup === "all-features") {
+            args.push("--all-features");
+        }
+        else if (featureGroup === "default-features") {
+            args.push("--default-features");
+        }
+        else if (featureGroup === "only-explicit-features") {
+            args.push("--only-explicit-features");
+        }
+    }
+    if (features) {
+        args.push("--features", features);
+    }
+    if (rustTarget) {
+        args.push("--target", rustTarget);
     }
     core.info(`Running: cargo ${args.join(" ")}`);
     core.info("---");
@@ -30546,6 +30564,9 @@ async function run() {
         const githubToken = core.getInput("github-token", { required: true });
         const packageName = core.getInput("package") || "";
         const toolchain = core.getInput("toolchain") || "";
+        const featureGroup = core.getInput("feature-group") || "";
+        const features = core.getInput("features") || "";
+        const rustTarget = core.getInput("rust-target") || "";
         const pr = github.context.payload.pull_request;
         if (!pr) {
             throw new Error("This action must run on pull_request events.");
@@ -30564,11 +30585,28 @@ async function run() {
         if (packageName) {
             core.info(`Package: ${packageName}`);
         }
+        if (featureGroup) {
+            core.info(`Feature group: ${featureGroup}`);
+        }
+        if (features) {
+            core.info(`Features: ${features}`);
+        }
+        if (rustTarget) {
+            core.info(`Rust target: ${rustTarget}`);
+        }
         core.info("");
         ensureGitShaAvailable(baseSha, cwd);
         await installCargoSemverChecks(cargoVersion, cwd, toolchain, useReleaseBinary);
         core.info("");
-        const result = runSemverChecks(baseSha, cwd, packageName, toolchain);
+        const result = runSemverChecks({
+            baseSha,
+            cwd,
+            packageName,
+            toolchain,
+            featureGroup,
+            features,
+            rustTarget,
+        });
         const semverType = determineSemverType(result);
         const label = `${labelPrefix}${semverType}`;
         core.info(`Determined semver type: ${semverType}`);

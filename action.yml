@@ -23,6 +23,15 @@ inputs:
   toolchain:
     description: "Rust toolchain to use (e.g. nightly, stable, 1.70.0)"
     required: false
+  feature-group:
+    description: "Which feature group to enable (all-features, default-features, only-explicit-features)"
+    required: false
+  features:
+    description: "Comma-separated list of features to enable"
+    required: false
+  rust-target:
+    description: "Rust target to build for (e.g. x86_64-pc-windows-msvc, aarch64-apple-darwin)"
+    required: false
 outputs:
   semver-type:
     description: "Detected semver update type (major/minor/patch)"

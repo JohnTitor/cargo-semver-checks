@@ -21,14 +21,17 @@ required semver update level.
 
 ## Inputs
 
-| Name                          | Required | Default        | Description                                                     |
-| ----------------------------- | -------- | -------------- | --------------------------------------------------------------- |
-| `cargo-semver-checks-version` | false    | `latest`       | Version of `cargo-semver-checks` to install.                    |
-| `use-release-binary`          | false    | `true`         | Install from GitHub release tarball instead of `cargo install`. |
-| `label-prefix`                | false    | `semver: `     | Prefix for labels.                                              |
-| `github-token`                | false    | `github.token` | Token with permission to label PRs.                             |
-| `package`                     | false    |                | Specific package to check (checks all if not set).              |
-| `toolchain`                   | false    |                | Rust toolchain to use (e.g. `nightly`, `stable`).               |
+| Name                          | Required | Default        | Description                                                                    |
+| ----------------------------- | -------- | -------------- | ------------------------------------------------------------------------------ |
+| `cargo-semver-checks-version` | false    | `latest`       | Version of `cargo-semver-checks` to install.                                   |
+| `use-release-binary`          | false    | `true`         | Install from GitHub release tarball instead of `cargo install`.                |
+| `label-prefix`                | false    | `semver: `     | Prefix for labels.                                                             |
+| `github-token`                | false    | `github.token` | Token with permission to label PRs.                                            |
+| `package`                     | false    |                | Specific package to check (checks all if not set).                             |
+| `toolchain`                   | false    |                | Rust toolchain to use (e.g. `nightly`, `stable`).                              |
+| `feature-group`               | false    |                | Feature group to enable (`all-features`, `default-features`, `only-explicit`). |
+| `features`                    | false    |                | Comma-separated list of features to enable.                                    |
+| `rust-target`                 | false    |                | Rust target to build for (e.g. `aarch64-apple-darwin`).                        |
 
 ## Outputs
 
@@ -76,6 +79,33 @@ jobs:
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
     toolchain: nightly
+```
+
+### Enabling specific features
+
+```yaml
+- uses: JohnTitor/cargo-semver-checks@v0.1.0
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    features: feature1,feature2
+```
+
+### Using a feature group
+
+```yaml
+- uses: JohnTitor/cargo-semver-checks@v0.1.0
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    feature-group: all-features
+```
+
+### Building for a specific target
+
+```yaml
+- uses: JohnTitor/cargo-semver-checks@v0.1.0
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    rust-target: aarch64-apple-darwin
 ```
 
 ### Using `cargo install` instead of pre-built binaries

@@ -1,5 +1,8 @@
 name: "Semver Labeler"
 description: "Run cargo-semver-checks on PRs and label the required semver bump"
+branding:
+  icon: "check-circle"
+  color: "green"
 inputs:
   cargo-semver-checks-version:
     description: "cargo-semver-checks version to install (e.g. 0.45.0 or latest)"

@@ -1,10 +1,10 @@
-const core = require("@actions/core");
-const github = require("@actions/github");
-const { spawnSync } = require("child_process");
-const https = require("https");
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import * as core from "@actions/core";
+import * as github from "@actions/github";
+import { spawnSync, SpawnSyncOptions, SpawnSyncReturns } from "child_process";
+import * as https from "https";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 
 const DEFAULT_CARGO_SEMVER_CHECKS_VERSION = "latest";
 const DEFAULT_LABEL_PREFIX = "semver: ";
@@ -12,11 +12,22 @@ const ANSI_ESCAPE = String.fromCharCode(27);
 const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
 const GITHUB_RELEASES_BASE = "https://github.com/obi1kenobi/cargo-semver-checks/releases";
 
-function runCommand(command, args, options = {}) {
+type SemverType = "major" | "minor" | "patch";
+
+interface CommandResult extends SpawnSyncReturns<string> {
+  stdout: string;
+  stderr: string;
+}
+
+function runCommand(
+  command: string,
+  args: string[],
+  options: SpawnSyncOptions = {},
+): CommandResult {
   const result = spawnSync(command, args, {
     encoding: "utf8",
     ...options,
-  });
+  }) as CommandResult;
 
   if (result.error) {
     throw new Error(`Failed to run "${command} ${args.join(" ")}": ${result.error.message}`);
@@ -25,15 +36,13 @@ function runCommand(command, args, options = {}) {
   return result;
 }
 
-function stripAnsi(input) {
+function stripAnsi(input: string): string {
   return input.replace(ANSI_ESCAPE_REGEX, "");
 }
 
-function ensureGitShaAvailable(sha, cwd) {
+function ensureGitShaAvailable(sha: string, cwd: string): void {
   core.info(`Checking if base SHA ${sha} is available...`);
-  const check = runCommand("git", ["cat-file", "-e", `${sha}^{commit}`], {
-    cwd,
-  });
+  const check = runCommand("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd });
   if (check.status === 0) {
     core.info("Base SHA is already available.");
     return;
@@ -51,7 +60,7 @@ function ensureGitShaAvailable(sha, cwd) {
   core.info("Base SHA fetched successfully.");
 }
 
-function getTargetTriple() {
+function getTargetTriple(): string | null {
   const platform = os.platform();
   const arch = os.arch();
 
@@ -74,10 +83,10 @@ function getTargetTriple() {
   return null;
 }
 
-function httpsGet(url) {
+function httpsGet(url: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const request = https.get(url, (response) => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+      if (response.statusCode! >= 300 && response.statusCode! < 400 && response.headers.location) {
         httpsGet(response.headers.location).then(resolve).catch(reject);
         return;
       }
@@ -87,8 +96,8 @@ function httpsGet(url) {
         return;
       }
 
-      const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
       response.on("end", () => resolve(Buffer.concat(chunks)));
       response.on("error", reject);
     });
@@ -96,11 +105,11 @@ function httpsGet(url) {
   });
 }
 
-async function getLatestVersion() {
+async function getLatestVersion(): Promise<string> {
   const url = `${GITHUB_RELEASES_BASE}/latest`;
   return new Promise((resolve, reject) => {
     const request = https.get(url, (response) => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+      if (response.statusCode! >= 300 && response.statusCode! < 400 && response.headers.location) {
         const match = response.headers.location.match(/\/tag\/v?(.+)$/);
         if (match) {
           resolve(match[1]);
@@ -113,7 +122,7 @@ async function getLatestVersion() {
   });
 }
 
-async function installFromRelease(version) {
+async function installFromRelease(version: string): Promise<void> {
   const triple = getTargetTriple();
   if (!triple) {
     throw new Error(`Unsupported platform: ${os.platform()}-${os.arch()}`);
@@ -169,8 +178,8 @@ async function installFromRelease(version) {
   core.info("cargo-semver-checks installed from release successfully.");
 }
 
-function installWithCargo(version, cwd, toolchain) {
-  const args = [];
+function installWithCargo(version: string, cwd: string, toolchain: string): void {
+  const args: string[] = [];
   if (toolchain) {
     args.push(`+${toolchain}`);
   }
@@ -191,7 +200,12 @@ function installWithCargo(version, cwd, toolchain) {
   core.info("cargo-semver-checks installed successfully.");
 }
 
-async function installCargoSemverChecks(version, cwd, toolchain, useReleaseBinary) {
+async function installCargoSemverChecks(
+  version: string,
+  cwd: string,
+  toolchain: string,
+  useReleaseBinary: boolean,
+): Promise<void> {
   const cargoCheck = runCommand("cargo", ["--version"], { cwd });
   if (cargoCheck.status !== 0) {
     throw new Error("cargo is not available in PATH.");
@@ -205,9 +219,8 @@ async function installCargoSemverChecks(version, cwd, toolchain, useReleaseBinar
         await installFromRelease(version);
         return;
       } catch (error) {
-        core.warning(
-          `Failed to install from release: ${error.message}. Falling back to cargo install.`,
-        );
+        const message = error instanceof Error ? error.message : String(error);
+        core.warning(`Failed to install from release: ${message}. Falling back to cargo install.`);
       }
     } else {
       core.info(`No prebuilt binary for ${os.platform()}-${os.arch()}, using cargo install.`);
@@ -217,9 +230,14 @@ async function installCargoSemverChecks(version, cwd, toolchain, useReleaseBinar
   installWithCargo(version, cwd, toolchain);
 }
 
-function runSemverChecks(baseSha, cwd, packageName, toolchain) {
+function runSemverChecks(
+  baseSha: string,
+  cwd: string,
+  packageName: string,
+  toolchain: string,
+): CommandResult {
   const env = { ...process.env, CARGO_TERM_COLOR: "always" };
-  const args = [];
+  const args: string[] = [];
   if (toolchain) {
     args.push(`+${toolchain}`);
   }
@@ -235,7 +253,6 @@ function runSemverChecks(baseSha, cwd, packageName, toolchain) {
 
   const result = runCommand("cargo", args, { cwd, env });
 
-  // Log stdout and stderr
   if (result.stdout) {
     core.info(result.stdout);
   }
@@ -249,23 +266,23 @@ function runSemverChecks(baseSha, cwd, packageName, toolchain) {
   return result;
 }
 
-function extractRequiredUpdatesFromText(text) {
-  const found = new Set();
+function extractRequiredUpdatesFromText(text: string): Set<SemverType> {
+  const found = new Set<SemverType>();
   const cleaned = stripAnsi(text);
 
   const regexes = [/semver requires new (major|minor|patch) version/gi];
 
   for (const regex of regexes) {
-    let match;
+    let match: RegExpExecArray | null;
     while ((match = regex.exec(cleaned)) !== null) {
-      found.add(match[1].toLowerCase());
+      found.add(match[1].toLowerCase() as SemverType);
     }
   }
 
   return found;
 }
 
-function determineSemverType(result) {
+function determineSemverType(result: CommandResult): SemverType {
   const combined = stripAnsi(`${result.stdout || ""}\n${result.stderr || ""}`).trim();
 
   const requiredUpdates = extractRequiredUpdatesFromText(combined);
@@ -285,19 +302,23 @@ function determineSemverType(result) {
   if (requiredUpdates.has("minor")) {
     return "minor";
   }
-  if (requiredUpdates.has("patch")) {
-    return "patch";
-  }
 
   return "patch";
 }
 
-async function ensureLabelExists(octokit, owner, repo, name) {
+type Octokit = ReturnType<typeof github.getOctokit>;
+
+async function ensureLabelExists(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  name: string,
+): Promise<void> {
   try {
     await octokit.rest.issues.getLabel({ owner, repo, name });
     return;
   } catch (error) {
-    if (!error || error.status !== 404) {
+    if (!error || (error as { status?: number }).status !== 404) {
       throw error;
     }
   }
@@ -311,7 +332,13 @@ async function ensureLabelExists(octokit, owner, repo, name) {
   });
 }
 
-async function removeLabelIfExists(octokit, owner, repo, issueNumber, name) {
+async function removeLabelIfExists(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  name: string,
+): Promise<void> {
   try {
     await octokit.rest.issues.removeLabel({
       owner,
@@ -320,13 +347,20 @@ async function removeLabelIfExists(octokit, owner, repo, issueNumber, name) {
       name,
     });
   } catch (error) {
-    if (!error || error.status !== 404) {
+    if (!error || (error as { status?: number }).status !== 404) {
       throw error;
     }
   }
 }
 
-async function upsertSemverLabel(octokit, owner, repo, issueNumber, labelPrefix, newLabel) {
+async function upsertSemverLabel(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  labelPrefix: string,
+  newLabel: string,
+): Promise<void> {
   const { data: existingLabels } = await octokit.rest.issues.listLabelsOnIssue({
     owner,
     repo,
@@ -354,7 +388,7 @@ async function upsertSemverLabel(octokit, owner, repo, issueNumber, labelPrefix,
   }
 }
 
-async function run() {
+async function run(): Promise<void> {
   try {
     const cargoVersion =
       core.getInput("cargo-semver-checks-version") || DEFAULT_CARGO_SEMVER_CHECKS_VERSION;
@@ -370,7 +404,7 @@ async function run() {
       throw new Error("This action must run on pull_request events.");
     }
 
-    const baseSha = pr.base && pr.base.sha;
+    const baseSha = pr.base?.sha as string | undefined;
     if (!baseSha) {
       throw new Error("Unable to determine the PR base SHA.");
     }
@@ -405,7 +439,8 @@ async function run() {
     core.setOutput("semver-type", semverType);
     core.info(`Applied label "${label}" to PR #${pr.number}.`);
   } catch (error) {
-    core.setFailed(error && error.message ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    core.setFailed(message);
   }
 }
 

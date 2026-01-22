@@ -4,20 +4,23 @@
   "private": true,
   "main": "dist/index.js",
   "scripts": {
-    "build": "ncc build src/index.js -o dist",
+    "build": "ncc build src/index.ts -o dist",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
     "fmt": "oxfmt --write .",
-    "fmt:check": "oxfmt --check ."
+    "fmt:check": "oxfmt --check .",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@actions/core": "^2.0.2",
     "@actions/github": "^7.0.0"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "@vercel/ncc": "^0.38.4",
     "oxfmt": "^0.26.0",
-    "oxlint": "^1.41.0"
+    "oxlint": "^1.41.0",
+    "typescript": "^5.7.0"
   },
   "engines": {
     "node": ">=24"

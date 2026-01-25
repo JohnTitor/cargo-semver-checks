@@ -2,6 +2,9 @@
   "name": "semver-labeler-action",
   "version": "0.1.0",
   "private": true,
+  "sideEffects": [
+    "./src/stdio.ts"
+  ],
   "main": "dist/index.js",
   "scripts": {
     "build": "ncc build src/index.ts -o dist",

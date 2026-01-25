@@ -30245,14 +30245,6 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 __nccwpck_require__(1155);
 const core = __importStar(__nccwpck_require__(9550));
 const github = __importStar(__nccwpck_require__(8087));
-function safeLog(message) {
-    try {
-        core.info(message);
-    }
-    catch {
-        // Ignore logging errors (e.g., EPIPE)
-    }
-}
 const child_process_1 = __nccwpck_require__(7698);
 const https = __importStar(__nccwpck_require__(5692));
 const fs = __importStar(__nccwpck_require__(9896));
@@ -30264,9 +30256,20 @@ const ANSI_ESCAPE = String.fromCharCode(27);
 const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
 const GITHUB_RELEASES_BASE = "https://github.com/obi1kenobi/cargo-semver-checks/releases";
 const RETRYABLE_STATUS_CODES = new Set([502, 503, 504]);
+function isEpipeError(error) {
+    if (!error || typeof error !== "object") {
+        return false;
+    }
+    const message = error instanceof Error ? error.message : "";
+    return message.includes("EPIPE");
+}
 function isRetryableError(error) {
     if (!error || typeof error !== "object") {
         return false;
+    }
+    // Retry on EPIPE - might be transient stdout issue
+    if (isEpipeError(error)) {
+        return true;
     }
     const status = error.status;
     if (status && RETRYABLE_STATUS_CODES.has(status)) {
@@ -30275,20 +30278,27 @@ function isRetryableError(error) {
     return false;
 }
 async function withRetries(operation, label, maxAttempts = 3) {
+    let lastError;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
             return await operation();
         }
         catch (error) {
+            lastError = error;
             const message = error instanceof Error ? error.message : String(error);
             if (attempt >= maxAttempts || !isRetryableError(error)) {
                 throw error;
             }
-            core.warning(`${label} failed (${message}). Retrying (${attempt}/${maxAttempts})...`);
+            try {
+                core.warning(`${label} failed (${message}). Retrying (${attempt}/${maxAttempts})...`);
+            }
+            catch {
+                // Ignore logging errors
+            }
             await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
         }
     }
-    throw new Error(`${label} failed after ${maxAttempts} attempts.`);
+    throw lastError || new Error(`${label} failed after ${maxAttempts} attempts.`);
 }
 function runCommand(command, args, options = {}) {
     const result = (0, child_process_1.spawnSync)(command, args, {
@@ -30676,24 +30686,20 @@ async function removeLabelIfExists(octokit, owner, repo, issueNumber, name) {
     }
 }
 async function upsertSemverLabel(octokit, owner, repo, issueNumber, labelPrefix, newLabel) {
-    safeLog(`Fetching existing labels for issue #${issueNumber}...`);
     const { data: existingLabels } = await octokit.rest.issues.listLabelsOnIssue({
         owner,
         repo,
         issue_number: issueNumber,
     });
     const existingNames = new Set(existingLabels.map((label) => label.name));
-    safeLog(`Found ${existingLabels.length} existing labels: ${[...existingNames].join(", ") || "(none)"}`);
     if (labelPrefix && labelPrefix.length > 0) {
         for (const label of existingLabels) {
             if (label.name.startsWith(labelPrefix) && label.name !== newLabel) {
-                safeLog(`Removing old label: ${label.name}`);
                 await removeLabelIfExists(octokit, owner, repo, issueNumber, label.name);
             }
         }
     }
     if (!existingNames.has(newLabel)) {
-        safeLog(`Adding new label: ${newLabel}`);
         await ensureLabelExists(octokit, owner, repo, newLabel);
         await octokit.rest.issues.addLabels({
             owner,
@@ -30701,9 +30707,6 @@ async function upsertSemverLabel(octokit, owner, repo, issueNumber, labelPrefix,
             issue_number: issueNumber,
             labels: [newLabel],
         });
-    }
-    else {
-        safeLog(`Label "${newLabel}" already exists, skipping.`);
     }
 }
 async function run() {
@@ -30763,15 +30766,14 @@ async function run() {
         const semverType = determineSemverType(result);
         const label = `${labelPrefix}${semverType}`;
         core.info(`Determined semver type: ${semverType}`);
-        safeLog(`Applying label "${label}" to PR #${prNumber}...`);
         await withRetries(() => upsertSemverLabel(octokit, owner, repo, prNumber, labelPrefix, label), "Apply semver label");
-        safeLog(`Label applied successfully.`);
         core.setOutput("semver-type", semverType);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         // Ignore EPIPE errors (broken stdout/stderr pipe)
         if (!message.includes("EPIPE")) {
+            process.exitCode = 1;
             try {
                 core.setFailed(message);
             }

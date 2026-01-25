@@ -2,13 +2,6 @@ import "./stdio";
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 
-function safeLog(message: string): void {
-  try {
-    core.info(message);
-  } catch {
-    // Ignore logging errors (e.g., EPIPE)
-  }
-}
 import { spawnSync, SpawnSyncOptions, SpawnSyncReturns } from "child_process";
 import * as https from "https";
 import * as fs from "fs";
@@ -22,6 +15,14 @@ const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
 const GITHUB_RELEASES_BASE = "https://github.com/obi1kenobi/cargo-semver-checks/releases";
 const RETRYABLE_STATUS_CODES = new Set([502, 503, 504]);
 
+function isEpipeError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const message = error instanceof Error ? error.message : "";
+  return message.includes("EPIPE");
+}
+
 type SemverType = "major" | "minor" | "patch";
 
 interface CommandResult extends SpawnSyncReturns<string> {
@@ -32,6 +33,11 @@ interface CommandResult extends SpawnSyncReturns<string> {
 function isRetryableError(error: unknown): boolean {
   if (!error || typeof error !== "object") {
     return false;
+  }
+
+  // Retry on EPIPE - might be transient stdout issue
+  if (isEpipeError(error)) {
+    return true;
   }
 
   const status = (error as { status?: number }).status;
@@ -47,19 +53,25 @@ async function withRetries<T>(
   label: string,
   maxAttempts = 3,
 ): Promise<T> {
+  let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
+      lastError = error;
       const message = error instanceof Error ? error.message : String(error);
       if (attempt >= maxAttempts || !isRetryableError(error)) {
         throw error;
       }
-      core.warning(`${label} failed (${message}). Retrying (${attempt}/${maxAttempts})...`);
+      try {
+        core.warning(`${label} failed (${message}). Retrying (${attempt}/${maxAttempts})...`);
+      } catch {
+        // Ignore logging errors
+      }
       await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
     }
   }
-  throw new Error(`${label} failed after ${maxAttempts} attempts.`);
+  throw lastError || new Error(`${label} failed after ${maxAttempts} attempts.`);
 }
 
 function runCommand(
@@ -563,7 +575,6 @@ async function upsertSemverLabel(
   labelPrefix: string,
   newLabel: string,
 ): Promise<void> {
-  safeLog(`Fetching existing labels for issue #${issueNumber}...`);
   const { data: existingLabels } = await octokit.rest.issues.listLabelsOnIssue({
     owner,
     repo,
@@ -571,21 +582,16 @@ async function upsertSemverLabel(
   });
 
   const existingNames = new Set(existingLabels.map((label) => label.name));
-  safeLog(
-    `Found ${existingLabels.length} existing labels: ${[...existingNames].join(", ") || "(none)"}`,
-  );
 
   if (labelPrefix && labelPrefix.length > 0) {
     for (const label of existingLabels) {
       if (label.name.startsWith(labelPrefix) && label.name !== newLabel) {
-        safeLog(`Removing old label: ${label.name}`);
         await removeLabelIfExists(octokit, owner, repo, issueNumber, label.name);
       }
     }
   }
 
   if (!existingNames.has(newLabel)) {
-    safeLog(`Adding new label: ${newLabel}`);
     await ensureLabelExists(octokit, owner, repo, newLabel);
     await octokit.rest.issues.addLabels({
       owner,
@@ -593,8 +599,6 @@ async function upsertSemverLabel(
       issue_number: issueNumber,
       labels: [newLabel],
     });
-  } else {
-    safeLog(`Label "${newLabel}" already exists, skipping.`);
   }
 }
 
@@ -666,18 +670,17 @@ async function run(): Promise<void> {
     const label = `${labelPrefix}${semverType}`;
     core.info(`Determined semver type: ${semverType}`);
 
-    safeLog(`Applying label "${label}" to PR #${prNumber}...`);
     await withRetries(
       () => upsertSemverLabel(octokit, owner, repo, prNumber, labelPrefix, label),
       "Apply semver label",
     );
-    safeLog(`Label applied successfully.`);
 
     core.setOutput("semver-type", semverType);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // Ignore EPIPE errors (broken stdout/stderr pipe)
     if (!message.includes("EPIPE")) {
+      process.exitCode = 1;
       try {
         core.setFailed(message);
       } catch {

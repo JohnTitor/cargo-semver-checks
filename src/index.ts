@@ -373,18 +373,62 @@ async function resolvePrContext(
     }
 
     const pullRequests = workflowRun.pull_requests || [];
-    if (pullRequests.length !== 1) {
+    let prNumber: number | undefined;
+    let baseSha = pullRequests[0]?.base?.sha as string | undefined;
+
+    if (pullRequests.length === 1) {
+      prNumber = pullRequests[0]?.number;
+    } else if (pullRequests.length === 0) {
+      const headRepo = workflowRun.head_repository;
+      const headBranch = workflowRun.head_branch as string | undefined;
+      const headOwner =
+        (headRepo?.owner?.login as string | undefined) ||
+        (headRepo?.owner?.name as string | undefined);
+
+      if (headOwner && headBranch) {
+        core.info("workflow_run.pull_requests is empty; resolving PR from head repository.");
+        const { data: headPRs } = await octokit.rest.pulls.list({
+          owner,
+          repo,
+          head: `${headOwner}:${headBranch}`,
+          state: "open",
+        });
+        if (headPRs.length === 1) {
+          prNumber = headPRs[0]?.number;
+          baseSha = headPRs[0]?.base?.sha || baseSha;
+        } else if (headPRs.length > 1) {
+          throw new Error(`Unable to resolve PR from head ref; found ${headPRs.length}.`);
+        }
+      }
+
+      if (!prNumber) {
+        const headSha = workflowRun.head_sha as string | undefined;
+        if (!headSha) {
+          throw new Error("workflow_run is missing head_sha.");
+        }
+        core.info("Resolving PR from head_sha.");
+        const { data: associatedPRs } =
+          await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+            owner,
+            repo,
+            commit_sha: headSha,
+          });
+        if (associatedPRs.length !== 1) {
+          throw new Error(`Unable to resolve PR from head_sha; found ${associatedPRs.length}.`);
+        }
+        prNumber = associatedPRs[0]?.number;
+        baseSha = associatedPRs[0]?.base?.sha || baseSha;
+      }
+    } else {
       throw new Error(
         `workflow_run must have exactly one pull request, found ${pullRequests.length}.`,
       );
     }
 
-    const prNumber = pullRequests[0]?.number;
     if (!prNumber) {
       throw new Error("workflow_run pull_request is missing number.");
     }
 
-    let baseSha = pullRequests[0]?.base?.sha as string | undefined;
     if (!baseSha) {
       const { data: prData } = await octokit.rest.pulls.get({
         owner,

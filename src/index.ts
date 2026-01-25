@@ -1,3 +1,4 @@
+import "./stdio";
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { spawnSync, SpawnSyncOptions, SpawnSyncReturns } from "child_process";
@@ -11,12 +12,46 @@ const DEFAULT_LABEL_PREFIX = "semver: ";
 const ANSI_ESCAPE = String.fromCharCode(27);
 const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
 const GITHUB_RELEASES_BASE = "https://github.com/obi1kenobi/cargo-semver-checks/releases";
+const RETRYABLE_STATUS_CODES = new Set([502, 503, 504]);
 
 type SemverType = "major" | "minor" | "patch";
 
 interface CommandResult extends SpawnSyncReturns<string> {
   stdout: string;
   stderr: string;
+}
+
+function isRetryableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const status = (error as { status?: number }).status;
+  if (status && RETRYABLE_STATUS_CODES.has(status)) {
+    return true;
+  }
+
+  return false;
+}
+
+async function withRetries<T>(
+  operation: () => Promise<T>,
+  label: string,
+  maxAttempts = 3,
+): Promise<T> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt >= maxAttempts || !isRetryableError(error)) {
+        throw error;
+      }
+      core.warning(`${label} failed (${message}). Retrying (${attempt}/${maxAttempts})...`);
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+  throw new Error(`${label} failed after ${maxAttempts} attempts.`);
 }
 
 function runCommand(
@@ -342,6 +377,9 @@ async function resolvePrContext(
   repo: string,
 ): Promise<PrContextResolution> {
   const eventName = github.context.eventName;
+  if (core.isDebug()) {
+    core.debug(`Event name: ${eventName}`);
+  }
 
   if (eventName === "pull_request") {
     const pr = github.context.payload.pull_request;
@@ -361,6 +399,16 @@ async function resolvePrContext(
     const workflowRun = github.context.payload.workflow_run;
     if (!workflowRun) {
       throw new Error("Missing workflow_run payload.");
+    }
+    if (core.isDebug()) {
+      const headRepo = workflowRun.head_repository;
+      const headRepoName =
+        (headRepo?.full_name as string | undefined) ||
+        (headRepo?.name as string | undefined) ||
+        "unknown";
+      core.debug(
+        `workflow_run id=${workflowRun.id || "unknown"} head_sha=${workflowRun.head_sha || "n/a"} head_branch=${workflowRun.head_branch || "n/a"} head_repo=${headRepoName}`,
+      );
     }
 
     const conclusion = workflowRun.conclusion;
@@ -393,6 +441,9 @@ async function resolvePrContext(
           head: `${headOwner}:${headBranch}`,
           state: "open",
         });
+        if (core.isDebug()) {
+          core.debug(`PRs for head ${headOwner}:${headBranch}: ${headPRs.length}`);
+        }
         if (headPRs.length === 1) {
           prNumber = headPRs[0]?.number;
           baseSha = headPRs[0]?.base?.sha || baseSha;
@@ -413,6 +464,9 @@ async function resolvePrContext(
             repo,
             commit_sha: headSha,
           });
+        if (core.isDebug()) {
+          core.debug(`PRs for head_sha ${headSha}: ${associatedPRs.length}`);
+        }
         if (associatedPRs.length !== 1) {
           throw new Error(`Unable to resolve PR from head_sha; found ${associatedPRs.length}.`);
         }
@@ -544,7 +598,10 @@ async function run(): Promise<void> {
 
     const octokit = github.getOctokit(githubToken);
     const { owner, repo } = github.context.repo;
-    const prContext = await resolvePrContext(octokit, owner, repo);
+    const prContext = await withRetries(
+      () => resolvePrContext(octokit, owner, repo),
+      "Resolve PR context",
+    );
     if (prContext.skip) {
       core.info(prContext.reason);
       return;
@@ -593,13 +650,23 @@ async function run(): Promise<void> {
     const label = `${labelPrefix}${semverType}`;
     core.info(`Determined semver type: ${semverType}`);
 
-    await upsertSemverLabel(octokit, owner, repo, prNumber, labelPrefix, label);
+    await withRetries(
+      () => upsertSemverLabel(octokit, owner, repo, prNumber, labelPrefix, label),
+      "Apply semver label",
+    );
 
     core.setOutput("semver-type", semverType);
     core.info(`Applied label "${label}" to PR #${prNumber}.`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    core.setFailed(message);
+    if (message.includes("EPIPE")) {
+      return;
+    }
+    try {
+      core.setFailed(message);
+    } catch {
+      // Ignore errors from setFailed (e.g., EPIPE)
+    }
   }
 }
 

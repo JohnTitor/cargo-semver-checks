@@ -30668,20 +30668,24 @@ async function removeLabelIfExists(octokit, owner, repo, issueNumber, name) {
     }
 }
 async function upsertSemverLabel(octokit, owner, repo, issueNumber, labelPrefix, newLabel) {
+    core.info(`Fetching existing labels for issue #${issueNumber}...`);
     const { data: existingLabels } = await octokit.rest.issues.listLabelsOnIssue({
         owner,
         repo,
         issue_number: issueNumber,
     });
     const existingNames = new Set(existingLabels.map((label) => label.name));
+    core.info(`Found ${existingLabels.length} existing labels: ${[...existingNames].join(", ") || "(none)"}`);
     if (labelPrefix && labelPrefix.length > 0) {
         for (const label of existingLabels) {
             if (label.name.startsWith(labelPrefix) && label.name !== newLabel) {
+                core.info(`Removing old label: ${label.name}`);
                 await removeLabelIfExists(octokit, owner, repo, issueNumber, label.name);
             }
         }
     }
     if (!existingNames.has(newLabel)) {
+        core.info(`Adding new label: ${newLabel}`);
         await ensureLabelExists(octokit, owner, repo, newLabel);
         await octokit.rest.issues.addLabels({
             owner,
@@ -30689,6 +30693,9 @@ async function upsertSemverLabel(octokit, owner, repo, issueNumber, labelPrefix,
             issue_number: issueNumber,
             labels: [newLabel],
         });
+    }
+    else {
+        core.info(`Label "${newLabel}" already exists, skipping.`);
     }
 }
 async function run() {
@@ -30748,20 +30755,21 @@ async function run() {
         const semverType = determineSemverType(result);
         const label = `${labelPrefix}${semverType}`;
         core.info(`Determined semver type: ${semverType}`);
+        core.info(`Applying label "${label}" to PR #${prNumber}...`);
         await withRetries(() => upsertSemverLabel(octokit, owner, repo, prNumber, labelPrefix, label), "Apply semver label");
+        core.info(`Label applied successfully.`);
         core.setOutput("semver-type", semverType);
-        core.info(`Applied label "${label}" to PR #${prNumber}.`);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (message.includes("EPIPE")) {
-            return;
-        }
-        try {
-            core.setFailed(message);
-        }
-        catch {
-            // Ignore errors from setFailed (e.g., EPIPE)
+        // Ignore EPIPE errors (broken stdout/stderr pipe)
+        if (!message.includes("EPIPE")) {
+            try {
+                core.setFailed(message);
+            }
+            catch {
+                // Ignore errors from setFailed itself
+            }
         }
     }
 }

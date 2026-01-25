@@ -332,6 +332,78 @@ function determineSemverType(result: CommandResult): SemverType {
 
 type Octokit = ReturnType<typeof github.getOctokit>;
 
+type PrContextResolution =
+  | { skip: true; reason: string }
+  | { skip: false; prNumber: number; baseSha: string };
+
+async function resolvePrContext(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+): Promise<PrContextResolution> {
+  const eventName = github.context.eventName;
+
+  if (eventName === "pull_request") {
+    const pr = github.context.payload.pull_request;
+    if (!pr) {
+      throw new Error("Missing pull_request payload.");
+    }
+
+    const baseSha = pr.base?.sha as string | undefined;
+    if (!baseSha) {
+      throw new Error("Unable to determine the PR base SHA.");
+    }
+
+    return { skip: false, prNumber: pr.number, baseSha };
+  }
+
+  if (eventName === "workflow_run") {
+    const workflowRun = github.context.payload.workflow_run;
+    if (!workflowRun) {
+      throw new Error("Missing workflow_run payload.");
+    }
+
+    const conclusion = workflowRun.conclusion;
+    if (conclusion !== "success") {
+      const rendered = conclusion ? String(conclusion) : "unknown";
+      return {
+        skip: true,
+        reason: `workflow_run conclusion is ${rendered}; skipping semver checks.`,
+      };
+    }
+
+    const pullRequests = workflowRun.pull_requests || [];
+    if (pullRequests.length !== 1) {
+      throw new Error(
+        `workflow_run must have exactly one pull request, found ${pullRequests.length}.`,
+      );
+    }
+
+    const prNumber = pullRequests[0]?.number;
+    if (!prNumber) {
+      throw new Error("workflow_run pull_request is missing number.");
+    }
+
+    let baseSha = pullRequests[0]?.base?.sha as string | undefined;
+    if (!baseSha) {
+      const { data: prData } = await octokit.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: prNumber,
+      });
+      baseSha = prData.base?.sha || undefined;
+    }
+
+    if (!baseSha) {
+      throw new Error("Unable to determine the PR base SHA.");
+    }
+
+    return { skip: false, prNumber, baseSha };
+  }
+
+  throw new Error(`Unsupported event type: ${eventName}`);
+}
+
 async function ensureLabelExists(
   octokit: Octokit,
   owner: string,
@@ -426,18 +498,20 @@ async function run(): Promise<void> {
     const features = core.getInput("features") || "";
     const rustTarget = core.getInput("rust-target") || "";
 
-    const pr = github.context.payload.pull_request;
-    if (!pr) {
-      throw new Error("This action must run on pull_request events.");
+    const octokit = github.getOctokit(githubToken);
+    const { owner, repo } = github.context.repo;
+    const prContext = await resolvePrContext(octokit, owner, repo);
+    if (prContext.skip) {
+      core.info(prContext.reason);
+      return;
     }
 
-    const baseSha = pr.base?.sha as string | undefined;
-    if (!baseSha) {
-      throw new Error("Unable to determine the PR base SHA.");
-    }
+    const { prNumber, baseSha } = prContext;
 
     const cwd = process.env.GITHUB_WORKSPACE || process.cwd();
 
+    core.info(`Event: ${github.context.eventName}`);
+    core.info(`PR number: ${prNumber}`);
     core.info(`Working directory: ${cwd}`);
     core.info(`PR base SHA: ${baseSha}`);
     core.info(`Use release binary: ${useReleaseBinary}`);
@@ -475,13 +549,10 @@ async function run(): Promise<void> {
     const label = `${labelPrefix}${semverType}`;
     core.info(`Determined semver type: ${semverType}`);
 
-    const octokit = github.getOctokit(githubToken);
-    const { owner, repo } = github.context.repo;
-
-    await upsertSemverLabel(octokit, owner, repo, pr.number, labelPrefix, label);
+    await upsertSemverLabel(octokit, owner, repo, prNumber, labelPrefix, label);
 
     core.setOutput("semver-type", semverType);
-    core.info(`Applied label "${label}" to PR #${pr.number}.`);
+    core.info(`Applied label "${label}" to PR #${prNumber}.`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     core.setFailed(message);

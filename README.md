@@ -6,9 +6,12 @@ compares the PR head against the PR base SHA with `--baseline-rev`.
 
 ## Why not `cargo-semver-checks-action`?
 
-The official [`cargo-semver-checks`](https://github.com/obi1kenobi/cargo-semver-checks-action) action focuses on running checks right before `cargo publish`. This action is specialized for PR workflows:
+The official [`cargo-semver-checks`](https://github.com/obi1kenobi/cargo-semver-checks-action) action focuses on running checks right before `cargo publish`.
+This action is specialized for PR workflows:
 it compares against the PR base SHA and automatically labels the PR with the
 required semver update level.
+
+This also supports running on the `workflow_run` event which is better than `pull_request_target` for security on OSS repos.
 
 ## Behavior
 
@@ -62,6 +65,38 @@ jobs:
           cargo-semver-checks-version: latest
           label-prefix: "semver: "
 ```
+
+### Using `workflow_run`
+
+Run this action after another workflow completes (for example, after CI), and use
+the workflow run's head SHA for checkout:
+
+```yaml
+name: Semver Label (post CI)
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+jobs:
+  semver-label:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: JohnTitor/cargo-semver-checks@v0.1.0
+```
+
+Notes:
+
+- The action runs only when `workflow_run.conclusion` is `success`.
+- The triggering workflow must be associated with exactly one PR (the action
+  errors if zero or multiple PRs are found).
 
 ### Checking a specific package
 

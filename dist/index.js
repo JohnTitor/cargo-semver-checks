@@ -30245,6 +30245,14 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 __nccwpck_require__(1155);
 const core = __importStar(__nccwpck_require__(9550));
 const github = __importStar(__nccwpck_require__(8087));
+function safeLog(message) {
+    try {
+        core.info(message);
+    }
+    catch {
+        // Ignore logging errors (e.g., EPIPE)
+    }
+}
 const child_process_1 = __nccwpck_require__(7698);
 const https = __importStar(__nccwpck_require__(5692));
 const fs = __importStar(__nccwpck_require__(9896));
@@ -30668,24 +30676,24 @@ async function removeLabelIfExists(octokit, owner, repo, issueNumber, name) {
     }
 }
 async function upsertSemverLabel(octokit, owner, repo, issueNumber, labelPrefix, newLabel) {
-    core.info(`Fetching existing labels for issue #${issueNumber}...`);
+    safeLog(`Fetching existing labels for issue #${issueNumber}...`);
     const { data: existingLabels } = await octokit.rest.issues.listLabelsOnIssue({
         owner,
         repo,
         issue_number: issueNumber,
     });
     const existingNames = new Set(existingLabels.map((label) => label.name));
-    core.info(`Found ${existingLabels.length} existing labels: ${[...existingNames].join(", ") || "(none)"}`);
+    safeLog(`Found ${existingLabels.length} existing labels: ${[...existingNames].join(", ") || "(none)"}`);
     if (labelPrefix && labelPrefix.length > 0) {
         for (const label of existingLabels) {
             if (label.name.startsWith(labelPrefix) && label.name !== newLabel) {
-                core.info(`Removing old label: ${label.name}`);
+                safeLog(`Removing old label: ${label.name}`);
                 await removeLabelIfExists(octokit, owner, repo, issueNumber, label.name);
             }
         }
     }
     if (!existingNames.has(newLabel)) {
-        core.info(`Adding new label: ${newLabel}`);
+        safeLog(`Adding new label: ${newLabel}`);
         await ensureLabelExists(octokit, owner, repo, newLabel);
         await octokit.rest.issues.addLabels({
             owner,
@@ -30695,7 +30703,7 @@ async function upsertSemverLabel(octokit, owner, repo, issueNumber, labelPrefix,
         });
     }
     else {
-        core.info(`Label "${newLabel}" already exists, skipping.`);
+        safeLog(`Label "${newLabel}" already exists, skipping.`);
     }
 }
 async function run() {
@@ -30755,9 +30763,9 @@ async function run() {
         const semverType = determineSemverType(result);
         const label = `${labelPrefix}${semverType}`;
         core.info(`Determined semver type: ${semverType}`);
-        core.info(`Applying label "${label}" to PR #${prNumber}...`);
+        safeLog(`Applying label "${label}" to PR #${prNumber}...`);
         await withRetries(() => upsertSemverLabel(octokit, owner, repo, prNumber, labelPrefix, label), "Apply semver label");
-        core.info(`Label applied successfully.`);
+        safeLog(`Label applied successfully.`);
         core.setOutput("semver-type", semverType);
     }
     catch (error) {

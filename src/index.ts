@@ -1,6 +1,14 @@
 import "./stdio";
 import * as core from "@actions/core";
 import * as github from "@actions/github";
+
+function safeLog(message: string): void {
+  try {
+    core.info(message);
+  } catch {
+    // Ignore logging errors (e.g., EPIPE)
+  }
+}
 import { spawnSync, SpawnSyncOptions, SpawnSyncReturns } from "child_process";
 import * as https from "https";
 import * as fs from "fs";
@@ -555,7 +563,7 @@ async function upsertSemverLabel(
   labelPrefix: string,
   newLabel: string,
 ): Promise<void> {
-  core.info(`Fetching existing labels for issue #${issueNumber}...`);
+  safeLog(`Fetching existing labels for issue #${issueNumber}...`);
   const { data: existingLabels } = await octokit.rest.issues.listLabelsOnIssue({
     owner,
     repo,
@@ -563,21 +571,21 @@ async function upsertSemverLabel(
   });
 
   const existingNames = new Set(existingLabels.map((label) => label.name));
-  core.info(
+  safeLog(
     `Found ${existingLabels.length} existing labels: ${[...existingNames].join(", ") || "(none)"}`,
   );
 
   if (labelPrefix && labelPrefix.length > 0) {
     for (const label of existingLabels) {
       if (label.name.startsWith(labelPrefix) && label.name !== newLabel) {
-        core.info(`Removing old label: ${label.name}`);
+        safeLog(`Removing old label: ${label.name}`);
         await removeLabelIfExists(octokit, owner, repo, issueNumber, label.name);
       }
     }
   }
 
   if (!existingNames.has(newLabel)) {
-    core.info(`Adding new label: ${newLabel}`);
+    safeLog(`Adding new label: ${newLabel}`);
     await ensureLabelExists(octokit, owner, repo, newLabel);
     await octokit.rest.issues.addLabels({
       owner,
@@ -586,7 +594,7 @@ async function upsertSemverLabel(
       labels: [newLabel],
     });
   } else {
-    core.info(`Label "${newLabel}" already exists, skipping.`);
+    safeLog(`Label "${newLabel}" already exists, skipping.`);
   }
 }
 
@@ -658,12 +666,12 @@ async function run(): Promise<void> {
     const label = `${labelPrefix}${semverType}`;
     core.info(`Determined semver type: ${semverType}`);
 
-    core.info(`Applying label "${label}" to PR #${prNumber}...`);
+    safeLog(`Applying label "${label}" to PR #${prNumber}...`);
     await withRetries(
       () => upsertSemverLabel(octokit, owner, repo, prNumber, labelPrefix, label),
       "Apply semver label",
     );
-    core.info(`Label applied successfully.`);
+    safeLog(`Label applied successfully.`);
 
     core.setOutput("semver-type", semverType);
   } catch (error) {

@@ -59,7 +59,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
-      - uses: JohnTitor/cargo-semver-checks@v0.1.0
+      - uses: JohnTitor/cargo-semver-checks@v0.2.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cargo-semver-checks-version: latest
@@ -89,7 +89,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-      - uses: JohnTitor/cargo-semver-checks@v0.1.0
+      - uses: JohnTitor/cargo-semver-checks@v0.2.0
 ```
 
 Notes:
@@ -101,7 +101,7 @@ Notes:
 ### Checking a specific package
 
 ```yaml
-- uses: JohnTitor/cargo-semver-checks@v0.1.0
+- uses: JohnTitor/cargo-semver-checks@v0.2.0
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
     package: my-crate
@@ -110,7 +110,7 @@ Notes:
 ### Using a specific toolchain
 
 ```yaml
-- uses: JohnTitor/cargo-semver-checks@v0.1.0
+- uses: JohnTitor/cargo-semver-checks@v0.2.0
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
     toolchain: nightly
@@ -119,7 +119,7 @@ Notes:
 ### Enabling specific features
 
 ```yaml
-- uses: JohnTitor/cargo-semver-checks@v0.1.0
+- uses: JohnTitor/cargo-semver-checks@v0.2.0
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
     features: feature1,feature2
@@ -128,7 +128,7 @@ Notes:
 ### Using a feature group
 
 ```yaml
-- uses: JohnTitor/cargo-semver-checks@v0.1.0
+- uses: JohnTitor/cargo-semver-checks@v0.2.0
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
     feature-group: all-features
@@ -137,7 +137,7 @@ Notes:
 ### Building for a specific target
 
 ```yaml
-- uses: JohnTitor/cargo-semver-checks@v0.1.0
+- uses: JohnTitor/cargo-semver-checks@v0.2.0
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
     rust-target: aarch64-apple-darwin
@@ -149,7 +149,7 @@ By default, the action downloads pre-built binaries from GitHub releases for fas
 If you prefer to build from source using `cargo install`, set `use-release-binary` to `false`:
 
 ```yaml
-- uses: JohnTitor/cargo-semver-checks@v0.1.0
+- uses: JohnTitor/cargo-semver-checks@v0.2.0
   with:
     github-token: ${{ secrets.GITHUB_TOKEN }}
     use-release-binary: false

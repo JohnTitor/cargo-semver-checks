@@ -19,28 +19,45 @@ This also supports running on the `workflow_run` event which is better than `pul
 - If `package` input is specified, runs with `-p <package>` instead of `--workspace`.
 - If `toolchain` input is specified, runs with `cargo +<toolchain>` (e.g. `cargo +nightly`).
 - Picks the highest required update: `major` > `minor` > `patch`.
-- Removes existing labels that start with the configured prefix.
+- By default, removes existing labels that start with the configured prefix.
 - Creates the label if it does not exist.
 
 ## Inputs
 
-| Name                          | Required | Default        | Description                                                                    |
-| ----------------------------- | -------- | -------------- | ------------------------------------------------------------------------------ |
-| `cargo-semver-checks-version` | false    | `latest`       | Version of `cargo-semver-checks` to install.                                   |
-| `use-release-binary`          | false    | `true`         | Install from GitHub release tarball instead of `cargo install`.                |
-| `label-prefix`                | false    | `semver: `     | Prefix for labels.                                                             |
-| `github-token`                | false    | `github.token` | Token with permission to label PRs.                                            |
-| `package`                     | false    |                | Specific package to check (checks all if not set).                             |
-| `toolchain`                   | false    |                | Rust toolchain to use (e.g. `nightly`, `stable`).                              |
-| `feature-group`               | false    |                | Feature group to enable (`all-features`, `default-features`, `only-explicit`). |
-| `features`                    | false    |                | Comma-separated list of features to enable.                                    |
-| `rust-target`                 | false    |                | Rust target to build for (e.g. `aarch64-apple-darwin`).                        |
+| Name                          | Required | Default        | Description                                                                      |
+| ----------------------------- | -------- | -------------- | -------------------------------------------------------------------------------- |
+| `cargo-semver-checks-version` | false    | `latest`       | Version of `cargo-semver-checks` to install.                                     |
+| `use-release-binary`          | false    | `true`         | Install from GitHub release tarball instead of `cargo install`.                  |
+| `label-prefix`                | false    | `semver: `     | Prefix for labels.                                                               |
+| `label-strategy`              | false    | `replace`      | How to handle existing semver labels: `replace`, `skip-if-any`, `skip-if-human`. |
+| `github-token`                | false    | `github.token` | Token with permission to label PRs.                                              |
+| `package`                     | false    |                | Specific package to check (checks all if not set).                               |
+| `toolchain`                   | false    |                | Rust toolchain to use (e.g. `nightly`, `stable`).                                |
+| `feature-group`               | false    |                | Feature group to enable (`all-features`, `default-features`, `only-explicit`).   |
+| `features`                    | false    |                | Comma-separated list of features to enable.                                      |
+| `rust-target`                 | false    |                | Rust target to build for (e.g. `aarch64-apple-darwin`).                          |
 
 ## Outputs
 
 | Name          | Description                                         |
 | ------------- | --------------------------------------------------- |
 | `semver-type` | Detected update type: `major`, `minor`, or `patch`. |
+
+## Label strategy
+
+The `label-strategy` input controls how the action behaves when a semver label
+already exists:
+
+- `replace` (default): remove existing semver labels with the configured prefix and apply the new one.
+- `skip-if-any`: do nothing if any existing semver label with the prefix is present.
+- `skip-if-human`: do nothing if the existing semver label was last applied by a non-bot actor.
+
+```yaml
+- uses: JohnTitor/cargo-semver-checks@v0.2.0
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    label-strategy: skip-if-human
+```
 
 ## Usage
 

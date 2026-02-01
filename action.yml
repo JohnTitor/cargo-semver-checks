@@ -16,6 +16,10 @@ inputs:
     description: "Label prefix (e.g. 'semver: ')"
     required: false
     default: "semver: "
+  label-strategy:
+    description: "How to handle existing semver labels: replace, skip-if-any, skip-if-human"
+    required: false
+    default: "replace"
   github-token:
     description: "GitHub token used to label PRs"
     required: false

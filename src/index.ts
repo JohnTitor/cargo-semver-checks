@@ -24,6 +24,10 @@ function isEpipeError(error: unknown): boolean {
 }
 
 type SemverType = "major" | "minor" | "patch";
+type LabelStrategy = "replace" | "skip-if-any" | "skip-if-human";
+
+const DEFAULT_LABEL_STRATEGY: LabelStrategy = "replace";
+const LABEL_STRATEGIES: ReadonlyArray<LabelStrategy> = ["replace", "skip-if-any", "skip-if-human"];
 
 interface CommandResult extends SpawnSyncReturns<string> {
   stdout: string;
@@ -95,9 +99,24 @@ function stripAnsi(input: string): string {
   return input.replace(ANSI_ESCAPE_REGEX, "");
 }
 
+function parseLabelStrategy(input: string): LabelStrategy {
+  const normalized = input.trim().toLowerCase();
+  if (!normalized) {
+    return DEFAULT_LABEL_STRATEGY;
+  }
+
+  if ((LABEL_STRATEGIES as readonly string[]).includes(normalized)) {
+    return normalized as LabelStrategy;
+  }
+
+  throw new Error(`Invalid label-strategy "${input}". Expected: ${LABEL_STRATEGIES.join(", ")}.`);
+}
+
 function ensureGitShaAvailable(sha: string, cwd: string): void {
   core.info(`Checking if base SHA ${sha} is available...`);
-  const check = runCommand("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd });
+  const check = runCommand("git", ["cat-file", "-e", `${sha}^{commit}`], {
+    cwd,
+  });
   if (check.status === 0) {
     core.info("Base SHA is already available.");
     return;
@@ -567,6 +586,91 @@ async function removeLabelIfExists(
   }
 }
 
+function isHumanActor(actor?: { type?: string } | null): boolean {
+  return actor?.type !== "Bot";
+}
+
+async function hasHumanAppliedSemverLabel(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  labelNames: string[],
+): Promise<boolean> {
+  if (labelNames.length === 0) {
+    return false;
+  }
+
+  const labelSet = new Set(labelNames);
+  let events: Awaited<ReturnType<typeof octokit.paginate>>;
+  try {
+    events = await octokit.paginate(octokit.rest.issues.listEvents, {
+      owner,
+      repo,
+      issue_number: issueNumber,
+      per_page: 100,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    core.warning(`Failed to load label events (${message}). Treating as human-labeled.`);
+    return true;
+  }
+
+  const latestByLabel = new Map<
+    string,
+    {
+      created_at?: string;
+      actor?: { type?: string; login?: string } | null;
+    }
+  >();
+
+  for (const event of events) {
+    if (event.event !== "labeled") {
+      continue;
+    }
+    if (!("label" in event)) {
+      continue;
+    }
+    const labelName = event.label?.name;
+    if (!labelName || !labelSet.has(labelName)) {
+      continue;
+    }
+    const existing = latestByLabel.get(labelName);
+    if (!existing) {
+      latestByLabel.set(labelName, {
+        created_at: event.created_at,
+        actor: event.actor,
+      });
+      continue;
+    }
+    if (!existing.created_at) {
+      latestByLabel.set(labelName, {
+        created_at: event.created_at,
+        actor: event.actor,
+      });
+      continue;
+    }
+    if (event.created_at && event.created_at > existing.created_at) {
+      latestByLabel.set(labelName, {
+        created_at: event.created_at,
+        actor: event.actor,
+      });
+    }
+  }
+
+  for (const labelName of labelSet) {
+    const latest = latestByLabel.get(labelName);
+    if (!latest) {
+      return true;
+    }
+    if (isHumanActor(latest.actor)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 async function upsertSemverLabel(
   octokit: Octokit,
   owner: string,
@@ -574,6 +678,7 @@ async function upsertSemverLabel(
   issueNumber: number,
   labelPrefix: string,
   newLabel: string,
+  labelStrategy: LabelStrategy,
 ): Promise<void> {
   const { data: existingLabels } = await octokit.rest.issues.listLabelsOnIssue({
     owner,
@@ -582,6 +687,29 @@ async function upsertSemverLabel(
   });
 
   const existingNames = new Set(existingLabels.map((label) => label.name));
+  const semverLabels = labelPrefix
+    ? existingLabels.filter((label) => label.name.startsWith(labelPrefix))
+    : [];
+
+  if (labelStrategy === "skip-if-any" && semverLabels.length > 0) {
+    core.info(`Skipping semver label update because existing ${labelPrefix} label(s) are present.`);
+    return;
+  }
+
+  if (labelStrategy === "skip-if-human" && semverLabels.length > 0) {
+    const labelNames = semverLabels.map((label) => label.name);
+    const hasHumanLabel = await hasHumanAppliedSemverLabel(
+      octokit,
+      owner,
+      repo,
+      issueNumber,
+      labelNames,
+    );
+    if (hasHumanLabel) {
+      core.info("Skipping semver label update because a human applied a semver label.");
+      return;
+    }
+  }
 
   if (labelPrefix && labelPrefix.length > 0) {
     for (const label of existingLabels) {
@@ -609,6 +737,7 @@ async function run(): Promise<void> {
     const useReleaseBinaryInput = core.getInput("use-release-binary");
     const useReleaseBinary = useReleaseBinaryInput === "" || useReleaseBinaryInput === "true";
     const labelPrefix = core.getInput("label-prefix") || DEFAULT_LABEL_PREFIX;
+    const labelStrategy = parseLabelStrategy(core.getInput("label-strategy"));
     const githubToken = core.getInput("github-token", { required: true });
     const packageName = core.getInput("package") || "";
     const toolchain = core.getInput("toolchain") || "";
@@ -636,6 +765,7 @@ async function run(): Promise<void> {
     core.info(`Working directory: ${cwd}`);
     core.info(`PR base SHA: ${baseSha}`);
     core.info(`Use release binary: ${useReleaseBinary}`);
+    core.info(`Label strategy: ${labelStrategy}`);
     if (toolchain) {
       core.info(`Toolchain: ${toolchain}`);
     }
@@ -671,7 +801,7 @@ async function run(): Promise<void> {
     core.info(`Determined semver type: ${semverType}`);
 
     await withRetries(
-      () => upsertSemverLabel(octokit, owner, repo, prNumber, labelPrefix, label),
+      () => upsertSemverLabel(octokit, owner, repo, prNumber, labelPrefix, label, labelStrategy),
       "Apply semver label",
     );
 

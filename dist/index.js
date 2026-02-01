@@ -30263,6 +30263,7 @@ function isEpipeError(error) {
     const message = error instanceof Error ? error.message : "";
     return message.includes("EPIPE");
 }
+const DEFAULT_LABEL_STRATEGY = "replace";
 function isRetryableError(error) {
     if (!error || typeof error !== "object") {
         return false;
@@ -30298,7 +30299,7 @@ async function withRetries(operation, label, maxAttempts = 3) {
             await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
         }
     }
-    throw lastError || new Error(`${label} failed after ${maxAttempts} attempts.`);
+    throw (lastError || new Error(`${label} failed after ${maxAttempts} attempts.`));
 }
 function runCommand(command, args, options = {}) {
     const result = (0, child_process_1.spawnSync)(command, args, {
@@ -30313,9 +30314,27 @@ function runCommand(command, args, options = {}) {
 function stripAnsi(input) {
     return input.replace(ANSI_ESCAPE_REGEX, "");
 }
+function parseLabelStrategy(input) {
+    const normalized = input.trim().toLowerCase();
+    if (!normalized) {
+        return DEFAULT_LABEL_STRATEGY;
+    }
+    switch (normalized) {
+        case "replace":
+            return "replace";
+        case "skip-if-any":
+            return "skip-if-any";
+        case "skip-if-human":
+            return "skip-if-human";
+        default:
+            throw new Error(`Invalid label-strategy "${input}". Expected: replace, skip-if-any, or skip-if-human.`);
+    }
+}
 function ensureGitShaAvailable(sha, cwd) {
     core.info(`Checking if base SHA ${sha} is available...`);
-    const check = runCommand("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd });
+    const check = runCommand("git", ["cat-file", "-e", `${sha}^{commit}`], {
+        cwd,
+    });
     if (check.status === 0) {
         core.info("Base SHA is already available.");
         return;
@@ -30350,7 +30369,9 @@ function getTargetTriple() {
 function httpsGet(url) {
     return new Promise((resolve, reject) => {
         const request = https.get(url, (response) => {
-            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+            if (response.statusCode >= 300 &&
+                response.statusCode < 400 &&
+                response.headers.location) {
                 httpsGet(response.headers.location).then(resolve).catch(reject);
                 return;
             }
@@ -30370,7 +30391,9 @@ async function getLatestVersion() {
     const url = `${GITHUB_RELEASES_BASE}/latest`;
     return new Promise((resolve, reject) => {
         const request = https.get(url, (response) => {
-            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+            if (response.statusCode >= 300 &&
+                response.statusCode < 400 &&
+                response.headers.location) {
                 const match = response.headers.location.match(/\/tag\/v?(.+)$/);
                 if (match) {
                     resolve(match[1]);
@@ -30393,7 +30416,9 @@ async function installFromRelease(version) {
         resolvedVersion = await getLatestVersion();
         core.info(`Latest version: ${resolvedVersion}`);
     }
-    const versionTag = resolvedVersion.startsWith("v") ? resolvedVersion : `v${resolvedVersion}`;
+    const versionTag = resolvedVersion.startsWith("v")
+        ? resolvedVersion
+        : `v${resolvedVersion}`;
     const isWindows = os.platform() === "win32";
     const ext = isWindows ? "zip" : "tar.gz";
     const assetName = `cargo-semver-checks-${triple}.${ext}`;
@@ -30472,7 +30497,7 @@ async function installCargoSemverChecks(version, cwd, toolchain, useReleaseBinar
     installWithCargo(version, cwd, toolchain);
 }
 function runSemverChecks(options) {
-    const { baseSha, cwd, packageName, toolchain, featureGroup, features, rustTarget } = options;
+    const { baseSha, cwd, packageName, toolchain, featureGroup, features, rustTarget, } = options;
     const env = { ...process.env, CARGO_TERM_COLOR: "always" };
     const args = [];
     if (toolchain) {
@@ -30685,13 +30710,95 @@ async function removeLabelIfExists(octokit, owner, repo, issueNumber, name) {
         }
     }
 }
-async function upsertSemverLabel(octokit, owner, repo, issueNumber, labelPrefix, newLabel) {
+function isHumanActor(actor) {
+    return actor?.type !== "Bot";
+}
+async function hasHumanAppliedSemverLabel(octokit, owner, repo, issueNumber, labelNames) {
+    if (labelNames.length === 0) {
+        return false;
+    }
+    const labelSet = new Set(labelNames);
+    let events;
+    try {
+        events = await octokit.paginate(octokit.rest.issues.listEvents, {
+            owner,
+            repo,
+            issue_number: issueNumber,
+            per_page: 100,
+        });
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        core.warning(`Failed to load label events (${message}). Treating as human-labeled.`);
+        return true;
+    }
+    const latestByLabel = new Map();
+    for (const event of events) {
+        if (event.event !== "labeled") {
+            continue;
+        }
+        if (!("label" in event)) {
+            continue;
+        }
+        const labelName = event.label?.name;
+        if (!labelName || !labelSet.has(labelName)) {
+            continue;
+        }
+        const existing = latestByLabel.get(labelName);
+        if (!existing) {
+            latestByLabel.set(labelName, {
+                created_at: event.created_at,
+                actor: event.actor,
+            });
+            continue;
+        }
+        if (!existing.created_at) {
+            latestByLabel.set(labelName, {
+                created_at: event.created_at,
+                actor: event.actor,
+            });
+            continue;
+        }
+        if (event.created_at && event.created_at > existing.created_at) {
+            latestByLabel.set(labelName, {
+                created_at: event.created_at,
+                actor: event.actor,
+            });
+        }
+    }
+    for (const labelName of labelSet) {
+        const latest = latestByLabel.get(labelName);
+        if (!latest) {
+            return true;
+        }
+        if (isHumanActor(latest.actor)) {
+            return true;
+        }
+    }
+    return false;
+}
+async function upsertSemverLabel(octokit, owner, repo, issueNumber, labelPrefix, newLabel, labelStrategy) {
     const { data: existingLabels } = await octokit.rest.issues.listLabelsOnIssue({
         owner,
         repo,
         issue_number: issueNumber,
     });
     const existingNames = new Set(existingLabels.map((label) => label.name));
+    const semverLabels = labelPrefix
+        ? existingLabels.filter((label) => label.name.startsWith(labelPrefix))
+        : [];
+    if (labelStrategy === "skip" && semverLabels.length > 0) {
+        core.info(`Skipping semver label update because existing ${labelPrefix} label(s) are present.`);
+        return;
+    }
+    if (labelStrategy === "skip-if-human" && semverLabels.length > 0) {
+        const labelNames = semverLabels.map((label) => label.name);
+        const hasHumanLabel = await hasHumanAppliedSemverLabel(octokit, owner, repo, issueNumber, labelNames);
+        if (hasHumanLabel) {
+            core.info("Skipping semver label update because a human applied a semver label.");
+            return;
+        }
+    }
     if (labelPrefix && labelPrefix.length > 0) {
         for (const label of existingLabels) {
             if (label.name.startsWith(labelPrefix) && label.name !== newLabel) {
@@ -30711,10 +30818,12 @@ async function upsertSemverLabel(octokit, owner, repo, issueNumber, labelPrefix,
 }
 async function run() {
     try {
-        const cargoVersion = core.getInput("cargo-semver-checks-version") || DEFAULT_CARGO_SEMVER_CHECKS_VERSION;
+        const cargoVersion = core.getInput("cargo-semver-checks-version") ||
+            DEFAULT_CARGO_SEMVER_CHECKS_VERSION;
         const useReleaseBinaryInput = core.getInput("use-release-binary");
         const useReleaseBinary = useReleaseBinaryInput === "" || useReleaseBinaryInput === "true";
         const labelPrefix = core.getInput("label-prefix") || DEFAULT_LABEL_PREFIX;
+        const labelStrategy = parseLabelStrategy(core.getInput("label-strategy"));
         const githubToken = core.getInput("github-token", { required: true });
         const packageName = core.getInput("package") || "";
         const toolchain = core.getInput("toolchain") || "";
@@ -30735,6 +30844,7 @@ async function run() {
         core.info(`Working directory: ${cwd}`);
         core.info(`PR base SHA: ${baseSha}`);
         core.info(`Use release binary: ${useReleaseBinary}`);
+        core.info(`Label strategy: ${labelStrategy}`);
         if (toolchain) {
             core.info(`Toolchain: ${toolchain}`);
         }
@@ -30766,7 +30876,7 @@ async function run() {
         const semverType = determineSemverType(result);
         const label = `${labelPrefix}${semverType}`;
         core.info(`Determined semver type: ${semverType}`);
-        await withRetries(() => upsertSemverLabel(octokit, owner, repo, prNumber, labelPrefix, label), "Apply semver label");
+        await withRetries(() => upsertSemverLabel(octokit, owner, repo, prNumber, labelPrefix, label, labelStrategy), "Apply semver label");
         core.setOutput("semver-type", semverType);
     }
     catch (error) {
